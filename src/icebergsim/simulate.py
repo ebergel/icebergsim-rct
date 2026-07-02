@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -20,7 +21,6 @@ from icebergsim.model import (
     DerivedLossProbabilities,
     ImperfectionDefinition,
     SimulationSummary,
-    TrialDefinition,
     ValidatedTrial,
     derive_loss_probabilities,
 )
@@ -137,8 +137,9 @@ def null_validated_trial(validated: ValidatedTrial) -> ValidatedTrial:
     )
 
 
-def input_hash(definition: TrialDefinition) -> str:
-    """Deterministic SHA-256 over the canonical JSON form of the definition (AXIOMS §3)."""
+def input_hash(definition: Any) -> str:
+    """Deterministic SHA-256 over the canonical JSON form of a definition dataclass
+    (AXIOMS §3). Accepts any frozen definition (individual, cluster, ...)."""
     payload = json.dumps(dataclasses.asdict(definition), sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 

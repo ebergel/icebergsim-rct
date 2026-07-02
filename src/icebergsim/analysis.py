@@ -336,6 +336,28 @@ def _chi2_sf(statistic: FloatArray) -> FloatArray:
     return np.asarray(stats.chi2.sf(statistic, df=1), dtype=np.float64)
 
 
+def batch_pearson_statistic(
+    control_events: npt.ArrayLike,
+    control_observed: npt.ArrayLike,
+    intervention_events: npt.ArrayLike,
+    intervention_observed: npt.ArrayLike,
+) -> FloatArray:
+    """Pearson X^2 statistic per table (SPEC §7.6); NaN where a denominator is zero.
+
+    Exposed for analyses that rescale the statistic, e.g. the design-effect adjusted
+    cluster chi-square (SPEC §14.4).
+    """
+    c = np.asarray(control_events, dtype=np.float64)
+    big_c = np.asarray(control_observed, dtype=np.float64)
+    e = np.asarray(intervention_events, dtype=np.float64)
+    big_e = np.asarray(intervention_observed, dtype=np.float64)
+    invalid = (big_c <= 0) | (big_e <= 0)
+    statistic = _batch_x2_statistic(
+        c, np.where(invalid, 1.0, big_c), e, np.where(invalid, 1.0, big_e)
+    )
+    return np.where(invalid, np.nan, statistic)
+
+
 def summarize_batch(batch: AnalysisBatch, alpha: float) -> SimulationSummary:
     """Summarize per-replicate arrays into SPEC §4.3 summary statistics.
 

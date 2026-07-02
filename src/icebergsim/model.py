@@ -225,6 +225,50 @@ class SimulationSummary:
     type_i_error_mcse: float | None = None
 
 
+ClusterSizeType = Literal["fixed", "poisson", "negative_binomial", "lognormal", "legacy_beta_size"]
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterSizeDistribution:
+    """Cluster-size generating distribution (SPEC §14.1). Sizes are clipped to [min, max]."""
+
+    type: ClusterSizeType = "fixed"
+    sd: float | None = None
+    min: int = 1
+    max: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterTrialDefinition:
+    """A validated post-only cluster randomized trial (SPEC §14.1)."""
+
+    id: str
+    n_simulations: int
+    control_clusters: int
+    intervention_clusters: int
+    mean_cluster_size: float
+    icc: float
+    p_control: float
+    p_intervention: float
+    label: str = ""
+    random_seed: int | None = None
+    alpha: float = 0.05
+    size_distribution: ClusterSizeDistribution = ClusterSizeDistribution()
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterSimulationSummary:
+    """Summary of a cluster simulation across the three required analyses (SPEC §14.4)."""
+
+    mean_cer: float
+    mean_eer: float
+    mean_design_effect: float
+    mean_cluster_level_difference: float
+    power_unadjusted_chi_square: float
+    power_adjusted_chi_square: float
+    power_cluster_level_difference: float
+
+
 @dataclass(frozen=True, slots=True)
 class TwoArmSampleSizeResult:
     """Formula sample size for two independent proportions (SPEC §10)."""
