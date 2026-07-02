@@ -115,3 +115,80 @@ export interface PowerCurveResponse {
   points: PowerCurvePoint[];
   plot: { total_n: number[]; power: number[]; power_mcse: number[] };
 }
+
+export interface StoppingPlanT {
+  rule: string;
+  n_interims: number;
+  information_fractions: number[];
+  interim_p_thresholds: number[];
+  final_p_threshold: number;
+  enabled: boolean;
+  stop_for: string;
+  minimum_total_events: number | null;
+}
+
+export interface StoppingSummaryT {
+  proportion_stopped_any: number;
+  proportion_stopped_benefit: number;
+  proportion_stopped_harm: number;
+  proportion_stopped_by_look: number[];
+  mean_fraction_at_stop: number | null;
+  final_power_including_stops: number;
+  type_i_error_including_stops: number | null;
+  type_i_error_mcse: number | null;
+}
+
+export interface StopByLookData {
+  looks: number[];
+  information_fractions: number[];
+  proportions: number[];
+  proportion_reaching_final: number;
+}
+
+export interface StoppingResponse {
+  manifest: {
+    input_hash: string;
+    random_seed: number | null;
+    n_simulations: number;
+    rng_algorithm: string;
+    spec_version: string;
+  };
+  plan: StoppingPlanT;
+  look_sample_sizes: [number, number][];
+  summary: StoppingSummaryT;
+  plots: { stop_by_look: StopByLookData };
+}
+
+export interface ForestRowT {
+  label: string;
+  rr: number | null;
+  rr_low: number | null;
+  rr_high: number | null;
+  arr: number | null;
+  arr_low: number | null;
+  arr_high: number | null;
+  is_aggregate: boolean;
+}
+
+export interface SubgroupResultRow {
+  id: string;
+  label: string;
+  n_control: number;
+  n_intervention: number;
+  summary: Summary;
+}
+
+export interface SubgroupsResponse {
+  manifest: {
+    input_hash: string;
+    random_seed: number | null;
+    n_simulations: number;
+    rng_algorithm: string;
+    spec_version: string;
+  };
+  subgroups: SubgroupResultRow[];
+  aggregate: { summary: Summary };
+  plots: { forest: { rows: ForestRowT[] } };
+  warnings: string[];
+  notes: string[];
+}

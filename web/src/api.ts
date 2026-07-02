@@ -8,6 +8,8 @@ import type {
   PowerCurveResponse,
   SampleSizeResponse,
   SimulationResponse,
+  StoppingResponse,
+  SubgroupsResponse,
   TrialDefinition,
   ValidateResponse,
 } from "./types";
@@ -67,4 +69,13 @@ export const api = {
     totalSampleSizes: number[],
   ): Promise<PowerCurveResponse> =>
     post("/api/power-curve", { definition, total_sample_sizes: totalSampleSizes }),
+  stopping: (
+    definition: TrialDefinition,
+    options?: { includeTypeIError?: boolean },
+  ): Promise<StoppingResponse> => {
+    const query = options?.includeTypeIError ? "?include_type_i_error=true" : "";
+    return post(`/api/stopping${query}`, definition);
+  },
+  subgroups: (family: Record<string, unknown>): Promise<SubgroupsResponse> =>
+    post("/api/subgroups", family),
 };

@@ -20,14 +20,45 @@ from typing import Any
 import numpy.typing as npt
 import yaml
 
+from icebergsim.model import SimulationSummary
 from icebergsim.simulate import SimulationResult
 
 EXPORT_FORMATS = ("json", "yaml", "csv")
 
 
+def summary_to_dict(summary: SimulationSummary) -> dict[str, Any]:
+    """JSON-safe form of a SimulationSummary (undefined values as null)."""
+    return {
+        "mean_cer": _number(summary.mean_cer),
+        "mean_eer": _number(summary.mean_eer),
+        "mean_arr": _number(summary.mean_arr),
+        "mean_rr": _number(summary.mean_rr),
+        "mean_rrr": _number(summary.mean_rrr),
+        "median_arr": _number(summary.median_arr),
+        "ci95_arr_empirical": [_number(v) for v in summary.ci95_arr_empirical],
+        "ci95_rr_empirical": [_number(v) for v in summary.ci95_rr_empirical],
+        "power": _number(summary.power),
+        "power_mcse": _number(summary.power_mcse),
+        "type_i_error": _number(summary.type_i_error),
+        "type_i_error_mcse": _number(summary.type_i_error_mcse),
+        "mean_nnt": _number(summary.mean_nnt),
+        "mean_nnh": _number(summary.mean_nnh),
+    }
+
+
+def to_json_safe(value: Any) -> Any:
+    """Recursively convert NaN floats to None and tuples to lists for strict JSON."""
+    if isinstance(value, float):
+        return None if math.isnan(value) else value
+    if isinstance(value, dict):
+        return {key: to_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [to_json_safe(item) for item in value]
+    return value
+
+
 def result_to_dict(result: SimulationResult, *, include_arrays: bool = True) -> dict[str, Any]:
     """Serialize a SimulationResult to plain JSON/YAML-safe data (SPEC §4.3 shape)."""
-    summary = result.summary
     payload: dict[str, Any] = {
         "manifest": {
             "input_hash": result.input_hash,
@@ -38,22 +69,7 @@ def result_to_dict(result: SimulationResult, *, include_arrays: bool = True) -> 
             "p_value_method": result.p_value_method,
             "alpha": result.alpha,
         },
-        "summary": {
-            "mean_cer": _number(summary.mean_cer),
-            "mean_eer": _number(summary.mean_eer),
-            "mean_arr": _number(summary.mean_arr),
-            "mean_rr": _number(summary.mean_rr),
-            "mean_rrr": _number(summary.mean_rrr),
-            "median_arr": _number(summary.median_arr),
-            "ci95_arr_empirical": [_number(v) for v in summary.ci95_arr_empirical],
-            "ci95_rr_empirical": [_number(v) for v in summary.ci95_rr_empirical],
-            "power": _number(summary.power),
-            "power_mcse": _number(summary.power_mcse),
-            "type_i_error": _number(summary.type_i_error),
-            "type_i_error_mcse": _number(summary.type_i_error_mcse),
-            "mean_nnt": _number(summary.mean_nnt),
-            "mean_nnh": _number(summary.mean_nnh),
-        },
+        "summary": summary_to_dict(result.summary),
         "warnings": list(result.warnings),
         "notes": list(result.notes),
     }

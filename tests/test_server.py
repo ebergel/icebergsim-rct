@@ -175,6 +175,110 @@ def test_power_curve_rejects_bad_requests(client: TestClient) -> None:
     assert any(e["code"] == "alpha_out_of_bounds" for e in bad_definition.json()["errors"])
 
 
+def stopping_raw(**overrides: Any) -> dict[str, Any]:
+    raw = make_raw(
+        n_simulations=2000,
+        allocation={"total_n": 800, "intervention_fraction": 0.5},
+        stopping={"enabled": True, "rule": "peto", "n_interims": 3},
+    )
+    raw.update(overrides)
+    return raw
+
+
+def family_payload() -> dict[str, Any]:
+    def trial(control: float, intervention: float) -> dict[str, Any]:
+        return make_raw(
+            n_simulations=1500,
+            random_seed=777,
+            arms={
+                "control": {"event_probability": control},
+                "intervention": {"event_probability": intervention},
+            },
+            allocation={"total_n": 200, "intervention_fraction": 0.5},
+        )
+
+    return {
+        "subgroups": [
+            {"id": "high", "label": "High risk", "weight": None, "trial": trial(0.30, 0.15)},
+            {"id": "low", "label": "Low risk", "weight": None, "trial": trial(0.10, 0.05)},
+        ]
+    }
+
+
+def test_stopping_contract(client: TestClient) -> None:
+    response = client.post("/api/stopping", json=stopping_raw())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan"]["interim_p_thresholds"] == [0.001, 0.001, 0.001]
+    assert body["plan"]["final_p_threshold"] == 0.05
+    assert body["look_sample_sizes"][-1] == [400, 400]
+    summary = body["summary"]
+    assert 0.0 <= summary["proportion_stopped_any"] <= 1.0
+    assert 0.0 <= summary["final_power_including_stops"] <= 1.0
+    assert summary["type_i_error_including_stops"] is None
+    plot = body["plots"]["stop_by_look"]
+    assert plot["looks"] == [1, 2, 3]
+    assert plot["information_fractions"] == [0.25, 0.5, 0.75]
+    assert len(plot["proportions"]) == 3
+    assert body["manifest"]["rng_algorithm"] == "PCG64"
+    assert "NaN" not in response.text
+
+
+def test_stopping_type_i_on_request(client: TestClient) -> None:
+    response = client.post(
+        "/api/stopping",
+        params={"include_type_i_error": "true"},
+        json=stopping_raw(n_simulations=1000),
+    )
+    assert response.json()["summary"]["type_i_error_including_stops"] is not None
+
+
+def test_stopping_requires_a_plan(client: TestClient) -> None:
+    response = client.post("/api/stopping", json=make_raw())
+    assert response.status_code == 422
+    assert any(e["code"] == "stopping_plan_missing" for e in response.json()["errors"])
+    bad = client.post(
+        "/api/stopping",
+        json=stopping_raw(
+            stopping={
+                "rule": "custom",
+                "n_interims": 3,
+                "interim_p_thresholds": [0.001, 0.01],
+                "final_p_threshold": 0.05,
+            }
+        ),
+    )
+    assert bad.status_code == 422
+    assert any(
+        e["code"] == "stopping_threshold_length_mismatch" for e in bad.json()["errors"]
+    )
+
+
+def test_subgroups_contract(client: TestClient) -> None:
+    response = client.post("/api/subgroups", json=family_payload())
+    assert response.status_code == 200
+    body = response.json()
+    assert [s["id"] for s in body["subgroups"]] == ["high", "low"]
+    assert body["subgroups"][0]["label"] == "High risk"
+    assert body["subgroups"][0]["n_control"] == 100
+    assert 0.0 <= body["subgroups"][0]["summary"]["power"] <= 1.0
+    assert 0.0 <= body["aggregate"]["summary"]["power"] <= 1.0
+    rows = body["plots"]["forest"]["rows"]
+    assert len(rows) == 3
+    assert rows[-1]["is_aggregate"] is True
+    assert rows[-1]["label"].startswith("Aggregate")
+    assert any("summed 2x2 counts" in note for note in body["notes"])
+    assert "NaN" not in response.text
+
+
+def test_subgroups_family_errors(client: TestClient) -> None:
+    payload = family_payload()
+    payload["subgroups"][1]["trial"]["random_seed"] = 42
+    response = client.post("/api/subgroups", json=payload)
+    assert response.status_code == 422
+    assert any(e["code"] == "subgroup_seed_mismatch" for e in response.json()["errors"])
+
+
 def test_simulate_response_is_strict_json(client: TestClient) -> None:
     """NaN must never leak into the wire format (undefined -> null)."""
     lossy: dict[str, Any] = make_raw(

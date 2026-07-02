@@ -15,9 +15,15 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from icebergsim._version import SPEC_VERSION
-from icebergsim.io import load_definition, result_to_dict
+from icebergsim.io import load_definition, result_to_dict, summary_to_dict, to_json_safe
 from icebergsim.model import ValidationError, validation_error
-from icebergsim.plots import arr_histogram, power_curve_data, rr_vs_p_scatter
+from icebergsim.plots import (
+    arr_histogram,
+    power_curve_data,
+    rr_vs_p_scatter,
+    stopping_look_distribution,
+    subgroup_forest,
+)
 from icebergsim.rng import RNG_ALGORITHM
 from icebergsim.sample_size import calculate_two_arm_sample_size
 from icebergsim.simulate import (
@@ -26,7 +32,12 @@ from icebergsim.simulate import (
     simulate_power_curve,
     simulate_trial,
 )
-from icebergsim.stopping import STOPPING_RULES
+from icebergsim.stopping import STOPPING_RULES, simulate_with_stopping
+from icebergsim.subgroups import (
+    ValidatedSubgroupFamily,
+    simulate_risk_subgroups,
+    validate_subgroup_family,
+)
 from icebergsim.validate import (
     SUPPORTED_ANALYSIS_POPULATIONS,
     SUPPORTED_P_VALUE_METHODS,
@@ -145,6 +156,80 @@ def api_router(examples_dir: Path) -> APIRouter:
         payload = dataclasses.asdict(curve)
         payload["plot"] = dataclasses.asdict(power_curve_data(curve))
         return payload
+
+    @router.post("/stopping")
+    def stopping(
+        definition: dict[str, Any],
+        include_type_i_error: bool = Query(default=False),
+    ) -> Any:
+        validated = validate_trial_definition(definition)
+        if isinstance(validated, tuple):
+            return _errors_response(validated)
+        if validated.definition.stopping is None:
+            return _errors_response(
+                (
+                    validation_error(
+                        "stopping_plan_missing",
+                        "definition has no enabled stopping plan.",
+                        "stopping",
+                    ),
+                )
+            )
+        result = simulate_with_stopping(validated, include_type_i_error=include_type_i_error)
+        return to_json_safe(
+            {
+                "manifest": {
+                    "input_hash": result.input_hash,
+                    "random_seed": result.random_seed,
+                    "n_simulations": result.n_simulations,
+                    "rng_algorithm": result.rng_algorithm,
+                    "spec_version": result.spec_version,
+                },
+                "plan": dataclasses.asdict(result.plan),
+                "look_sample_sizes": list(result.look_sample_sizes),
+                "summary": dataclasses.asdict(result.summary),
+                "plots": {
+                    "stop_by_look": dataclasses.asdict(stopping_look_distribution(result))
+                },
+            }
+        )
+
+    @router.post("/subgroups")
+    def subgroups(family_raw: dict[str, Any]) -> Any:
+        family = validate_subgroup_family(family_raw)
+        if not isinstance(family, ValidatedSubgroupFamily):
+            return _errors_response(family)
+        result = simulate_risk_subgroups(family)
+        return to_json_safe(
+            {
+                "manifest": {
+                    "input_hash": result.input_hash,
+                    "random_seed": result.random_seed,
+                    "n_simulations": result.n_simulations,
+                    "rng_algorithm": result.rng_algorithm,
+                    "spec_version": result.spec_version,
+                },
+                "subgroups": [
+                    {
+                        "id": subgroup_result.id,
+                        "label": subgroup_result.label,
+                        "n_control": subgroup.validated.n_control,
+                        "n_intervention": subgroup.validated.n_intervention,
+                        "summary": summary_to_dict(subgroup_result.result.summary),
+                    }
+                    for subgroup, subgroup_result in zip(
+                        family.subgroups, result.subgroups, strict=True
+                    )
+                ],
+                "aggregate": {"summary": summary_to_dict(result.aggregate_summary)},
+                "plots": {"forest": dataclasses.asdict(subgroup_forest(result))},
+                "warnings": list(result.warnings),
+                "notes": [
+                    "aggregate result computed from summed 2x2 counts per replicate; "
+                    "subgroup effect measures are never averaged (SPEC §12.2)"
+                ],
+            }
+        )
 
     return router
 

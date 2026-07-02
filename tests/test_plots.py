@@ -17,6 +17,8 @@ from icebergsim.plots import (
     make_plot_data,
     power_curve_data,
     rr_vs_p_scatter,
+    stopping_look_distribution,
+    subgroup_forest,
 )
 from icebergsim.simulate import (
     PowerCurveResult,
@@ -24,6 +26,10 @@ from icebergsim.simulate import (
     simulate_power_curve,
     simulate_trial,
 )
+from icebergsim.stopping import simulate_with_stopping
+from icebergsim.subgroups import simulate_risk_subgroups
+from test_stopping import stopping_trial
+from test_subgroups import validated_family
 from trial_builders import make_validated
 
 
@@ -108,6 +114,40 @@ def test_power_curve_data_mirrors_curve_points() -> None:
     assert data.total_n == (100, 400)
     assert data.power == tuple(p.power for p in curve.points)
     assert data.power_mcse == tuple(p.power_mcse for p in curve.points)
+
+
+# --- stopping-look distribution (SPEC §16 plot 6) ----------------------------------------------
+
+
+def test_stopping_look_distribution_mirrors_result() -> None:
+    result = simulate_with_stopping(stopping_trial(n_simulations=1000))
+    data = stopping_look_distribution(result)
+    assert data.looks == (1, 2, 3)
+    assert data.information_fractions == (0.25, 0.5, 0.75)
+    assert data.proportions == result.summary.proportion_stopped_by_look
+    assert math.isclose(
+        data.proportion_reaching_final,
+        1.0 - result.summary.proportion_stopped_any,
+        abs_tol=1e-12,
+    )
+
+
+# --- subgroup forest rows (SPEC §16 plot 7) -----------------------------------------------------
+
+
+def test_subgroup_forest_rows_align_with_summaries() -> None:
+    result = simulate_risk_subgroups(validated_family())
+    forest = subgroup_forest(result)
+    assert len(forest.rows) == 3
+    assert [row.label for row in forest.rows[:2]] == ["High-risk patients", "Low-risk patients"]
+    assert forest.rows[0].is_aggregate is False
+    aggregate = forest.rows[-1]
+    assert aggregate.is_aggregate is True
+    assert aggregate.rr == result.aggregate_summary.mean_rr
+    assert aggregate.rr_low == result.aggregate_summary.ci95_rr_empirical[0]
+    assert aggregate.arr == result.aggregate_summary.mean_arr
+    first = forest.rows[0]
+    assert first.rr == result.subgroups[0].result.summary.mean_rr
 
 
 # --- dispatcher (ARCHITECTURE §3.10 make_plot_data) --------------------------------------------

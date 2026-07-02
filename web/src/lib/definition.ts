@@ -164,3 +164,177 @@ export function powerCurveSizes(totalN: number): number[] {
 export function ratioToInterventionFraction(ratio: number): number {
   return ratio / (1 + ratio);
 }
+
+// --- stopping rules (SPEC §11, §17 stopping workflow) ------------------------------------------
+
+export interface StoppingForm {
+  rule: "peto" | "pocock" | "obrien_fleming" | "custom";
+  nInterims: number;
+  stopFor: "benefit" | "harm" | "benefit_or_harm";
+  minimumTotalEvents: number | null;
+  // Custom rule only; comma-separated in the UI, parsed via parseNumberList.
+  interimPThresholds: number[] | null;
+  finalPThreshold: number | null;
+}
+
+export const DEFAULT_STOPPING: StoppingForm = {
+  rule: "peto",
+  nInterims: 3,
+  stopFor: "benefit_or_harm",
+  minimumTotalEvents: null,
+  interimPThresholds: null,
+  finalPThreshold: null,
+};
+
+export function parseNumberList(text: string): number[] | null {
+  const parts = text
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length === 0) return null;
+  const numbers = parts.map(Number);
+  return numbers.some(Number.isNaN) ? null : numbers;
+}
+
+export function buildStoppingDefinition(
+  form: QuickTrialForm,
+  stopping: StoppingForm,
+): TrialDefinition {
+  const block: Record<string, unknown> = {
+    enabled: true,
+    rule: stopping.rule,
+    n_interims: stopping.nInterims,
+    stop_for: stopping.stopFor,
+  };
+  if (stopping.minimumTotalEvents !== null) {
+    block["minimum_total_events"] = stopping.minimumTotalEvents;
+  }
+  if (stopping.rule === "custom") {
+    block["interim_p_thresholds"] = stopping.interimPThresholds;
+    block["final_p_threshold"] = stopping.finalPThreshold;
+  }
+  return {
+    ...buildDefinition(form),
+    id: "stopping_trial",
+    label: "Trial with interim stopping",
+    stopping: block,
+  };
+}
+
+const STOPPING_PATH_TO_FIELD: [string, keyof StoppingForm][] = [
+  ["stopping.rule", "rule"],
+  ["stopping.n_interims", "nInterims"],
+  ["stopping.stop_for", "stopFor"],
+  ["stopping.minimum_total_events", "minimumTotalEvents"],
+  ["stopping.interim_p_thresholds", "interimPThresholds"],
+  ["stopping.final_p_threshold", "finalPThreshold"],
+  ["stopping.information_fractions", "nInterims"],
+];
+
+export interface MappedStoppingErrors {
+  stopping: Partial<Record<keyof StoppingForm, string>>;
+  rest: ApiError[];
+}
+
+export function mapStoppingErrors(errors: ApiError[]): MappedStoppingErrors {
+  const stopping: MappedStoppingErrors["stopping"] = {};
+  const rest: ApiError[] = [];
+  for (const error of errors) {
+    const match = STOPPING_PATH_TO_FIELD.find(([prefix]) => error.path.startsWith(prefix));
+    if (match && stopping[match[1]] === undefined) {
+      stopping[match[1]] = error.message;
+    } else if (!match) {
+      rest.push(error);
+    }
+  }
+  return { stopping, rest };
+}
+
+// --- risk subgroups (SPEC §12, §17.4) -----------------------------------------------------------
+
+export interface SubgroupRowForm {
+  id: string;
+  label: string;
+  totalN: number;
+  controlRisk: number;
+  interventionRisk: number;
+}
+
+export interface SubgroupSharedForm {
+  alpha: number;
+  nSimulations: number;
+  randomSeed: number | null;
+  untreatedRisk: number;
+}
+
+export const DEFAULT_SUBGROUP_ROWS: SubgroupRowForm[] = [
+  { id: "high_risk", label: "High risk", totalN: 200, controlRisk: 0.3, interventionRisk: 0.15 },
+  { id: "low_risk", label: "Low risk", totalN: 200, controlRisk: 0.1, interventionRisk: 0.05 },
+];
+
+export const DEFAULT_SUBGROUP_SHARED: SubgroupSharedForm = {
+  alpha: 0.05,
+  nSimulations: 3000,
+  randomSeed: 12345,
+  untreatedRisk: 0.3,
+};
+
+export function buildSubgroupFamily(
+  shared: SubgroupSharedForm,
+  rows: SubgroupRowForm[],
+): Record<string, unknown> {
+  return {
+    subgroups: rows.map((row) => ({
+      id: row.id,
+      label: row.label,
+      weight: null,
+      trial: buildDefinition({
+        totalN: row.totalN,
+        interventionFraction: 0.5,
+        controlRisk: row.controlRisk,
+        interventionRisk: row.interventionRisk,
+        untreatedRisk: shared.untreatedRisk,
+        alpha: shared.alpha,
+        nSimulations: shared.nSimulations,
+        randomSeed: shared.randomSeed,
+      }),
+    })),
+  };
+}
+
+export interface MappedSubgroupErrors {
+  // Row index -> field -> message, for aria-invalid highlighting per subgroup row.
+  rows: Record<number, Partial<Record<keyof SubgroupRowForm, string>>>;
+  general: ApiError[];
+}
+
+const SUBGROUP_TRIAL_PATH_TO_FIELD: [string, keyof SubgroupRowForm][] = [
+  ["arms.control.event_probability", "controlRisk"],
+  ["arms.intervention.event_probability", "interventionRisk"],
+  ["allocation", "totalN"],
+  ["id", "id"],
+];
+
+export function mapSubgroupErrors(errors: ApiError[]): MappedSubgroupErrors {
+  const rows: MappedSubgroupErrors["rows"] = {};
+  const general: ApiError[] = [];
+  for (const error of errors) {
+    const match = error.path.match(/^subgroups\[(\d+)\](?:\.trial\.(.+)|\.(.+))?$/);
+    if (!match) {
+      general.push(error);
+      continue;
+    }
+    const index = Number(match[1]);
+    const innerPath = match[2] ?? match[3] ?? "";
+    const field = SUBGROUP_TRIAL_PATH_TO_FIELD.find(([prefix]) =>
+      innerPath.startsWith(prefix),
+    )?.[1];
+    if (field) {
+      rows[index] = rows[index] ?? {};
+      if (rows[index][field] === undefined) rows[index][field] = error.message;
+    } else {
+      general.push(error);
+    }
+  }
+  return { rows, general };
+}
