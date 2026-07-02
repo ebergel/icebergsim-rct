@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
-from icebergsim import SPEC_VERSION
+from icebergsim._version import SPEC_VERSION
 from icebergsim.analysis import analyze_2x2_batch
 from icebergsim.model import (
     StoppingPlan,

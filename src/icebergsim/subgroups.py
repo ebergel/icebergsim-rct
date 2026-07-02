@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from icebergsim import SPEC_VERSION
+from icebergsim._version import SPEC_VERSION
 from icebergsim.analysis import AnalysisBatch, analyze_2x2_batch, summarize_batch
 from icebergsim.model import (
     SimulationSummary,

@@ -9,8 +9,11 @@ import numpy as np
 import pytest
 
 from icebergsim.simulate import (
+    PowerCurveResult,
     input_hash,
     null_validated_trial,
+    simulate_null,
+    simulate_power_curve,
     simulate_trial,
 )
 from trial_builders import make_validated
@@ -117,6 +120,31 @@ def test_summary_effect_measures_are_consistent() -> None:
     assert math.isclose(summary.mean_arr, summary.mean_cer - summary.mean_eer, abs_tol=1e-12)
     assert summary.ci95_arr_empirical[0] <= summary.median_arr <= summary.ci95_arr_empirical[1]
     assert summary.mean_nnt is not None and summary.mean_nnt > 0
+
+
+def test_power_curve_is_monotone_and_reproducible() -> None:
+    validated = make_validated(n_simulations=3000)
+    curve = simulate_power_curve(validated, (100, 400, 1600))
+    assert isinstance(curve, PowerCurveResult)
+    assert [p.total_n for p in curve.points] == [100, 400, 1600]
+    assert curve.points[1].n_control == 200 and curve.points[1].n_intervention == 200
+    powers = [p.power for p in curve.points]
+    for smaller, larger in zip(powers, powers[1:], strict=False):
+        assert larger >= smaller - 0.03  # Monte Carlo tolerance
+    again = simulate_power_curve(make_validated(n_simulations=3000), (100, 400, 1600))
+    assert isinstance(again, PowerCurveResult)
+    assert [p.power for p in again.points] == powers
+
+
+def test_power_curve_rejects_invalid_sizes() -> None:
+    result = simulate_power_curve(make_validated(n_simulations=100), (0, 400))
+    assert isinstance(result, tuple)
+    assert any(e.code == "power_curve_sizes_invalid" for e in result)
+
+
+def test_simulate_null_convenience_matches_null_copy() -> None:
+    result = simulate_null(make_validated(n_simulations=5000))
+    assert abs(result.summary.power - 0.05) < 0.02  # rejection rate under the null
 
 
 def test_simulation_does_not_mutate_definition() -> None:

@@ -25,7 +25,21 @@ uv run mypy
 ```
 
 Canonical spec tests are parsed from `spec/tests.yaml` and run as first-class pytest cases
-(`tests/test_spec_yaml.py`). Cases whose module is not yet implemented are reported as `xfail`.
+(`tests/test_spec_yaml.py`).
+
+## Status
+
+Implements SPEC_VERSION 2.0.0-alpha.1 completely for v2.0 scope: **all 19 canonical cases
+and all 5 property tests in spec/tests.yaml pass**, all four canonical examples run
+end-to-end, and every result carries a reproducibility manifest (input hash, seed, PCG64,
+spec version, analysis method).
+
+Reserved for v2.1 (explicitly rejected with structured errors, never silent):
+cluster pre/post *simulation* (the §15.1 sample-size formula IS implemented),
+`legacy_expected_partition` mode, `monte_carlo_exact` p-values, `legacy_beta_size` cluster
+sizes, non-default analysis populations (`as_treated`, `per_protocol`,
+`intention_to_treat_all_randomized`), parquet export, and visualizations (SPEC §16 —
+plot data can be derived from the exported result arrays).
 
 ## Design rules
 

@@ -15,14 +15,18 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from icebergsim import SPEC_VERSION
+from icebergsim._version import SPEC_VERSION
 from icebergsim.analysis import AnalysisBatch, analyze_2x2_batch, summarize_batch
 from icebergsim.model import (
+    Allocation,
     DerivedLossProbabilities,
     ImperfectionDefinition,
     SimulationSummary,
     ValidatedTrial,
+    ValidationError,
     derive_loss_probabilities,
+    round_half_up,
+    validation_error,
 )
 from icebergsim.rng import RNG_ALGORITHM, create_rng
 
@@ -117,6 +121,84 @@ def simulate_trial(
         summary=summary,
         warnings=tuple(warnings),
         notes=notes,
+    )
+
+
+def simulate_null(validated: ValidatedTrial, *, stream_name: str = "null") -> SimulationResult:
+    """Simulate the SPEC §9.2 null copy directly; its power is the Type I error."""
+    return simulate_trial(null_validated_trial(validated), stream_name=stream_name)
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurvePoint:
+    total_n: int
+    n_control: int
+    n_intervention: int
+    power: float
+    power_mcse: float
+
+
+@dataclass(frozen=True, slots=True)
+class PowerCurveResult:
+    """Power as a function of total sample size (ARCHITECTURE §4, SPEC §16 plot 3)."""
+
+    input_hash: str
+    random_seed: int | None
+    rng_algorithm: str
+    spec_version: str
+    points: tuple[PowerCurvePoint, ...]
+
+
+def simulate_power_curve(
+    validated: ValidatedTrial, total_sample_sizes: tuple[int, ...] | list[int]
+) -> PowerCurveResult | tuple[ValidationError, ...]:
+    """Simulate the trial at each total sample size, keeping the allocation fraction.
+
+    Each size runs on its own derived RNG stream, so points are independent and the
+    curve is reproducible from the definition's seed.
+    """
+    if not total_sample_sizes or any(
+        not isinstance(n, int) or isinstance(n, bool) or n < 2 for n in total_sample_sizes
+    ):
+        return (
+            validation_error(
+                "power_curve_sizes_invalid",
+                "total_sample_sizes must be a non-empty list of integers >= 2.",
+                "total_sample_sizes",
+            ),
+        )
+    definition = validated.definition
+    fraction = definition.allocation.intervention_fraction
+    points = []
+    for total_n in total_sample_sizes:
+        n_intervention = round_half_up(total_n * fraction)
+        n_control = total_n - n_intervention
+        variant = ValidatedTrial(
+            definition=dataclasses.replace(
+                definition,
+                allocation=Allocation(total_n=total_n, intervention_fraction=fraction),
+                control=dataclasses.replace(definition.control, n=None),
+                intervention=dataclasses.replace(definition.intervention, n=None),
+            ),
+            n_control=n_control,
+            n_intervention=n_intervention,
+        )
+        result = simulate_trial(variant, stream_name=f"power_curve/{total_n}")
+        points.append(
+            PowerCurvePoint(
+                total_n=total_n,
+                n_control=n_control,
+                n_intervention=n_intervention,
+                power=result.summary.power,
+                power_mcse=result.summary.power_mcse,
+            )
+        )
+    return PowerCurveResult(
+        input_hash=input_hash(definition),
+        random_seed=definition.random_seed,
+        rng_algorithm=RNG_ALGORITHM,
+        spec_version=SPEC_VERSION,
+        points=tuple(points),
     )
 
 

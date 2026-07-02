@@ -19,7 +19,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy import stats
 
-from icebergsim import SPEC_VERSION
+from icebergsim._version import SPEC_VERSION
 from icebergsim.analysis import analyze_2x2_batch, batch_pearson_statistic
 from icebergsim.model import (
     ClusterSimulationSummary,
