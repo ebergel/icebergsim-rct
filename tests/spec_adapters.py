@@ -13,7 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from icebergsim.model import ValidationError
+from icebergsim.analysis import analyze_2x2
+from icebergsim.model import Table2x2, ValidationError
 from icebergsim.validate import derive_loss_probabilities, validate_trial_definition
 from spec_harness import Adapter
 
@@ -53,7 +54,34 @@ def _adapt_validate_trial_definition(case_input: Mapping[str, Any]) -> Mapping[s
     }
 
 
+def _adapt_analyze_2x2(case_input: Mapping[str, Any]) -> Mapping[str, Any]:
+    # Distinguish "explicitly null" from "absent" for the zero-cell correction (SPEC §7.4).
+    correction = case_input.get("zero_cell_correction", 0.5)
+    result = analyze_2x2(
+        Table2x2(
+            control_events=case_input["control_events"],
+            control_observed=case_input["control_observed"],
+            intervention_events=case_input["intervention_events"],
+            intervention_observed=case_input["intervention_observed"],
+        ),
+        alpha=case_input.get("alpha", 0.05),
+        zero_cell_correction=correction,
+    )
+    return {
+        "cer": result.cer,
+        "eer": result.eer,
+        "arr": result.arr,
+        "rr": result.rr,
+        "rrr": result.rrr,
+        "nnt": result.nnt,
+        "nnh": result.nnh,
+        "p_value": result.p_value,
+        "warnings": list(result.warnings),
+    }
+
+
 ADAPTERS: dict[tuple[str, str], Adapter] = {
     ("derived_probabilities", "loss_adjustment"): _adapt_loss_adjustment,
     ("individual_simulation", "validate_trial_definition"): _adapt_validate_trial_definition,
+    ("analysis", "analyze_2x2"): _adapt_analyze_2x2,
 }

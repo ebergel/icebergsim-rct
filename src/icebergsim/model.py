@@ -121,3 +121,31 @@ class DerivedLossProbabilities:
 
     p_lost: float
     p_nonlost: float
+
+
+@dataclass(frozen=True, slots=True)
+class Table2x2:
+    """Observed counts of one simulated trial: events and denominators by assigned arm."""
+
+    control_events: int
+    control_observed: int
+    intervention_events: int
+    intervention_observed: int
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisResult:
+    """Analysis of one 2x2 table (SPEC §7). Undefined quantities are None, with a warning."""
+
+    cer: float | None
+    eer: float | None
+    arr: float | None
+    rr: float | None
+    rrr: float | None
+    nnt: float | None
+    nnh: float | None
+    arr_ci: tuple[float, float] | None
+    rr_ci: tuple[float, float] | None
+    rrr_ci: tuple[float, float] | None
+    p_value: float | None
+    warnings: tuple[str, ...]
