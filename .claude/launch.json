@@ -11,6 +11,22 @@
         "icebergsim-server"
       ],
       "port": 8000
+    },
+    {
+      "name": "landing-page",
+      "runtimeExecutable": "/Users/eduardobergel/.local/bin/uv",
+      "runtimeArgs": [
+        "run",
+        "--directory",
+        "/Users/eduardobergel/Documents/ClaudeCode/icebergSim/icebergsim-v2",
+        "python",
+        "-m",
+        "http.server",
+        "8377",
+        "-d",
+        "docs"
+      ],
+      "port": 8377
     }
   ]
 }

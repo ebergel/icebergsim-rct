@@ -58,6 +58,11 @@ Still reserved (explicitly rejected with structured errors, never silent):
 sizes, non-default analysis populations (`as_treated`, `per_protocol`,
 `intention_to_treat_all_randomized`), and parquet export.
 
+## License
+
+MIT — see [LICENSE](LICENSE). The Phoenix specification in `spec/` documents the
+behavior any reimplementation must preserve.
+
 ## Design rules
 
 See [CLAUDE.md](CLAUDE.md). In short: pure functions over frozen data, RNG always injected,
