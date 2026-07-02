@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
+import numpy.typing as npt
 from scipy import stats
 
-from icebergsim.model import AnalysisResult, Table2x2
+from icebergsim.model import AnalysisResult, SimulationSummary, Table2x2
+
+FloatArray = npt.NDArray[np.float64]
 
 # A p-value function takes (control_events, control_observed, intervention_events,
 # intervention_observed) and returns the two-sided p-value.
@@ -172,6 +176,146 @@ P_VALUE_METHODS: dict[str, PValueFunction] = {
     "pearson_chi_square": _pearson_chi_square_p,
     "fisher_exact": _fisher_exact_p,
 }
+
+
+# --- batch analysis over simulation replicates (SPEC §6.3, §4.3, §9) ------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisBatch:
+    """Per-replicate analysis arrays. RR/RRR hold NaN where undefined (null on export)."""
+
+    cer: FloatArray
+    eer: FloatArray
+    arr: FloatArray
+    rr: FloatArray
+    rrr: FloatArray
+    p_values: FloatArray
+    zero_event_cell_count: int
+
+
+def analyze_2x2_batch(
+    control_events: npt.ArrayLike,
+    control_observed: npt.ArrayLike,
+    intervention_events: npt.ArrayLike,
+    intervention_observed: npt.ArrayLike,
+    *,
+    p_value_method: str = "likelihood_ratio",
+    zero_cell_correction: float | None = 0.5,
+) -> AnalysisBatch:
+    """Vectorized analysis of many 2x2 tables, exactly equivalent to analyze_2x2 per table."""
+    c = np.asarray(control_events, dtype=np.float64)
+    big_c = np.asarray(control_observed, dtype=np.float64)
+    e = np.asarray(intervention_events, dtype=np.float64)
+    big_e = np.asarray(intervention_observed, dtype=np.float64)
+
+    cer, eer = c / big_c, e / big_e
+    arr = cer - eer
+    zero_mask = (c == 0) | (e == 0)
+    if zero_cell_correction is None:
+        safe_c = np.where(zero_mask, 1.0, c)  # dummy avoids 0/0; result masked to NaN below
+        rr = np.where(zero_mask, np.nan, (e / big_e) / (safe_c / big_c))
+    else:
+        k = zero_cell_correction
+        corr_c = np.where(zero_mask, c + k, c)
+        corr_e = np.where(zero_mask, e + k, e)
+        corr_big_c = np.where(zero_mask, big_c + 2.0 * k, big_c)
+        corr_big_e = np.where(zero_mask, big_e + 2.0 * k, big_e)
+        rr = (corr_e / corr_big_e) / (corr_c / corr_big_c)
+    return AnalysisBatch(
+        cer=cer,
+        eer=eer,
+        arr=arr,
+        rr=rr,
+        rrr=1.0 - rr,
+        p_values=_batch_p_values(c, big_c, e, big_e, p_value_method),
+        zero_event_cell_count=int(zero_mask.sum()),
+    )
+
+
+def _batch_p_values(
+    c: FloatArray, big_c: FloatArray, e: FloatArray, big_e: FloatArray, method: str
+) -> FloatArray:
+    if method == "likelihood_ratio":
+        return _chi2_sf(_batch_g_statistic(c, big_c, e, big_e))
+    if method == "pearson_chi_square":
+        return _chi2_sf(_batch_x2_statistic(c, big_c, e, big_e))
+    p_value_function = P_VALUE_METHODS.get(method)
+    if p_value_function is None:
+        raise ValueError(f"unsupported p_value_method for batch analysis: {method!r}")
+    # No vectorized form (e.g. Fisher exact): fall back to the scalar function per table.
+    return np.array(
+        [
+            p_value_function(int(ci), int(big_ci), int(ei), int(big_ei))
+            for ci, big_ci, ei, big_ei in zip(c, big_c, e, big_e, strict=True)
+        ],
+        dtype=np.float64,
+    )
+
+
+def _batch_observed_expected(
+    c: FloatArray, big_c: FloatArray, e: FloatArray, big_e: FloatArray
+) -> tuple[FloatArray, FloatArray]:
+    p_common = (c + e) / (big_c + big_e)
+    observed = np.stack([c, big_c - c, e, big_e - e])
+    expected = np.stack(
+        [big_c * p_common, big_c * (1.0 - p_common), big_e * p_common, big_e * (1.0 - p_common)]
+    )
+    return observed, expected
+
+
+def _batch_g_statistic(
+    c: FloatArray, big_c: FloatArray, e: FloatArray, big_e: FloatArray
+) -> FloatArray:
+    """SPEC §7.5 vectorized; O_j = 0 terms contribute zero, degenerate tables give G = 0."""
+    observed, expected = _batch_observed_expected(c, big_c, e, big_e)
+    ratio = np.where(observed > 0, observed / np.where(expected > 0, expected, 1.0), 1.0)
+    g = 2.0 * np.sum(observed * np.log(ratio), axis=0)
+    return np.maximum(g, 0.0)
+
+
+def _batch_x2_statistic(
+    c: FloatArray, big_c: FloatArray, e: FloatArray, big_e: FloatArray
+) -> FloatArray:
+    """SPEC §7.6 vectorized; zero expected cells only occur with zero observed cells."""
+    observed, expected = _batch_observed_expected(c, big_c, e, big_e)
+    contributions = (observed - expected) ** 2 / np.where(expected > 0, expected, 1.0)
+    return np.asarray(np.sum(contributions, axis=0))
+
+
+def _chi2_sf(statistic: FloatArray) -> FloatArray:
+    return np.asarray(stats.chi2.sf(statistic, df=1), dtype=np.float64)
+
+
+def summarize_batch(batch: AnalysisBatch, alpha: float) -> SimulationSummary:
+    """Summarize per-replicate arrays into SPEC §4.3 summary statistics."""
+    arr, rr = batch.arr, batch.rr
+    n = arr.size
+    power = float(np.mean(batch.p_values < alpha))
+    defined_rr = rr[~np.isnan(rr)]
+    benefit = arr[arr > 0.0]
+    harm = arr[arr < 0.0]
+    return SimulationSummary(
+        mean_cer=float(batch.cer.mean()),
+        mean_eer=float(batch.eer.mean()),
+        mean_arr=float(arr.mean()),
+        mean_rr=float(defined_rr.mean()) if defined_rr.size else None,
+        mean_rrr=float(1.0 - defined_rr.mean()) if defined_rr.size else None,
+        median_arr=float(np.median(arr)),
+        ci95_arr_empirical=(
+            float(np.percentile(arr, 2.5)),
+            float(np.percentile(arr, 97.5)),
+        ),
+        ci95_rr_empirical=(
+            (float(np.percentile(defined_rr, 2.5)), float(np.percentile(defined_rr, 97.5)))
+            if defined_rr.size
+            else (None, None)
+        ),
+        power=power,
+        power_mcse=math.sqrt(power * (1.0 - power) / n),
+        mean_nnt=float((1.0 / benefit).mean()) if benefit.size else None,
+        mean_nnh=float((-1.0 / harm).mean()) if harm.size else None,
+    )
 
 
 def _z_two_sided(alpha: float) -> float:

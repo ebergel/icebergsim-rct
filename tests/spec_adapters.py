@@ -13,12 +13,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
+import pytest
+
 from icebergsim.analysis import analyze_2x2
 from icebergsim.model import Table2x2, ValidationError
 from icebergsim.sample_size import (
     calculate_cluster_post_sample_size,
     calculate_two_arm_sample_size,
 )
+from icebergsim.simulate import SimulationResult, simulate_trial
 from icebergsim.validate import derive_loss_probabilities, validate_trial_definition
 from spec_harness import Adapter
 
@@ -127,9 +131,38 @@ def _adapt_cluster_post_sample_size(case_input: Mapping[str, Any]) -> Mapping[st
     }
 
 
+def _run_simulation(raw: Mapping[str, Any]) -> SimulationResult:
+    validated = validate_trial_definition(raw)
+    assert not isinstance(validated, tuple), f"case input failed validation: {validated}"
+    return simulate_trial(validated)
+
+
+def _adapt_simulate_individual_trial(case_input: Mapping[str, Any]) -> Mapping[str, Any]:
+    if "run_a" in case_input:  # seed_reproducibility: same definition simulated twice
+        a = _run_simulation(case_input["run_a"])
+        b = _run_simulation(case_input["run_a"])
+        identical = (
+            np.array_equal(a.tables.control_events, b.tables.control_events)
+            and np.array_equal(a.tables.control_observed, b.tables.control_observed)
+            and np.array_equal(a.tables.intervention_events, b.tables.intervention_events)
+            and np.array_equal(a.tables.intervention_observed, b.tables.intervention_observed)
+            and np.array_equal(a.arrays.p_values, b.arrays.p_values)
+        )
+        return {"arrays_identical": identical}
+    if "pragmatic" in case_input:  # ideal-vs-pragmatic power comparison
+        pytest.xfail("imperfection simulation (SPEC §6.2) is implemented in Step 5")
+    result = _run_simulation(case_input)
+    return {
+        "mean_cer": result.summary.mean_cer,
+        "mean_eer": result.summary.mean_eer,
+        "power": result.summary.power,
+    }
+
+
 ADAPTERS: dict[tuple[str, str], Adapter] = {
     ("derived_probabilities", "loss_adjustment"): _adapt_loss_adjustment,
     ("individual_simulation", "validate_trial_definition"): _adapt_validate_trial_definition,
+    ("individual_simulation", "simulate_individual_trial"): _adapt_simulate_individual_trial,
     ("analysis", "analyze_2x2"): _adapt_analyze_2x2,
     ("sample_size", "calculate_two_arm_sample_size"): _adapt_two_arm_sample_size,
     ("cluster", "sample_size_cluster_post"): _adapt_cluster_post_sample_size,

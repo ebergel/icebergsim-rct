@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 from hypothesis import given
 from hypothesis import strategies as st
 from scipy import stats
 
-from icebergsim.analysis import analyze_2x2
+from icebergsim.analysis import analyze_2x2, analyze_2x2_batch
 from icebergsim.model import Table2x2
+from icebergsim.rng import create_rng
 
 Z95 = 1.959963984540054  # Phi^-1(0.975)
 
@@ -152,6 +154,48 @@ def test_unsupported_p_value_method_yields_null_with_warning() -> None:
     result = analyze_2x2(TABLE, p_value_method="monte_carlo_exact")
     assert result.p_value is None
     assert any("p_value_method_unsupported" in w for w in result.warnings)
+
+
+def test_batch_analysis_matches_scalar_analysis_exactly() -> None:
+    """SPEC §6.3: vectorized batch must be exactly equivalent to per-table analysis."""
+    rng = create_rng(2024, "batch-equivalence")
+    n_tables = 300
+    big_c, big_e = 60, 40
+    # Low event probability so zero cells genuinely occur in the sample.
+    c = rng.binomial(big_c, 0.05, size=n_tables)
+    e = rng.binomial(big_e, 0.03, size=n_tables)
+    for method in ("likelihood_ratio", "pearson_chi_square"):
+        for correction in (0.5, None):
+            batch = analyze_2x2_batch(
+                control_events=c,
+                control_observed=np.full(n_tables, big_c),
+                intervention_events=e,
+                intervention_observed=np.full(n_tables, big_e),
+                p_value_method=method,
+                zero_cell_correction=correction,
+            )
+            assert int(np.isnan(batch.rr).sum()) == (
+                batch.zero_event_cell_count if correction is None else 0
+            )
+            for i in range(n_tables):
+                scalar = analyze_2x2(
+                    Table2x2(
+                        control_events=int(c[i]),
+                        control_observed=big_c,
+                        intervention_events=int(e[i]),
+                        intervention_observed=big_e,
+                    ),
+                    p_value_method=method,
+                    zero_cell_correction=correction,
+                )
+                assert scalar.p_value is not None
+                assert math.isclose(batch.p_values[i], scalar.p_value, abs_tol=1e-12)
+                assert scalar.arr is not None
+                assert math.isclose(batch.arr[i], scalar.arr, abs_tol=1e-12)
+                if scalar.rr is None:
+                    assert math.isnan(batch.rr[i])
+                else:
+                    assert math.isclose(batch.rr[i], scalar.rr, abs_tol=1e-12)
 
 
 @given(data=st.data())

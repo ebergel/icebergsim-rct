@@ -131,6 +131,30 @@ class DerivedLossProbabilities:
 
 
 @dataclass(frozen=True, slots=True)
+class SimulationSummary:
+    """Summary of one simulation run (SPEC §4.3, §9).
+
+    Means of RR/RRR/NNT/NNH are taken over the replicates where they are defined;
+    None when no replicate defines them. ci95_* are the empirical 2.5/97.5 percentiles.
+    """
+
+    mean_cer: float
+    mean_eer: float
+    mean_arr: float
+    mean_rr: float | None
+    mean_rrr: float | None
+    median_arr: float
+    ci95_arr_empirical: tuple[float, float]
+    ci95_rr_empirical: tuple[float | None, float | None]
+    power: float
+    power_mcse: float
+    mean_nnt: float | None
+    mean_nnh: float | None
+    type_i_error: float | None = None
+    type_i_error_mcse: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TwoArmSampleSizeResult:
     """Formula sample size for two independent proportions (SPEC §10)."""
 
