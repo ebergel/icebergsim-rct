@@ -398,6 +398,30 @@ export function buildClusterDefinition(form: ClusterForm): TrialDefinition {
   };
 }
 
+export interface PrePostExtras {
+  baselineRisk: number;
+  prePostCorrelation: number;
+}
+
+export const DEFAULT_PRE_POST: PrePostExtras = {
+  baselineRisk: 0.2,
+  prePostCorrelation: 0.5,
+};
+
+export function buildClusterPrePostDefinition(
+  form: ClusterForm,
+  extras: PrePostExtras,
+): TrialDefinition {
+  return {
+    ...buildClusterDefinition(form),
+    id: "cluster_pre_post_trial",
+    label: "Pre/post cluster randomized trial",
+    mode: "cluster_pre_post",
+    baseline_event_probability: extras.baselineRisk,
+    pre_post_correlation: extras.prePostCorrelation,
+  };
+}
+
 const CLUSTER_PATH_TO_FIELD: [string, keyof ClusterForm][] = [
   ["clusters.control_clusters", "controlClusters"],
   ["clusters.intervention_clusters", "interventionClusters"],
@@ -415,13 +439,29 @@ const CLUSTER_PATH_TO_FIELD: [string, keyof ClusterForm][] = [
 
 export interface MappedClusterErrors {
   fields: Partial<Record<keyof ClusterForm, string>>;
+  prePost: Partial<Record<keyof PrePostExtras, string>>;
   general: ApiError[];
 }
 
+const PRE_POST_PATH_TO_FIELD: [string, keyof PrePostExtras][] = [
+  ["baseline_event_probability", "baselineRisk"],
+  ["pre_post_correlation", "prePostCorrelation"],
+];
+
 export function mapClusterErrors(errors: ApiError[]): MappedClusterErrors {
   const fields: MappedClusterErrors["fields"] = {};
+  const prePost: MappedClusterErrors["prePost"] = {};
   const general: ApiError[] = [];
   for (const error of errors) {
+    const prePostMatch = PRE_POST_PATH_TO_FIELD.find(([prefix]) =>
+      error.path.startsWith(prefix),
+    );
+    if (prePostMatch) {
+      if (prePost[prePostMatch[1]] === undefined) {
+        prePost[prePostMatch[1]] = error.message;
+      }
+      continue;
+    }
     const match = CLUSTER_PATH_TO_FIELD.find(([prefix]) => error.path.startsWith(prefix));
     if (match && fields[match[1]] === undefined) {
       fields[match[1]] = error.message;
@@ -429,5 +469,5 @@ export function mapClusterErrors(errors: ApiError[]): MappedClusterErrors {
       general.push(error);
     }
   }
-  return { fields, general };
+  return { fields, prePost, general };
 }

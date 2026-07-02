@@ -9,20 +9,30 @@ import { NumberField } from "../components/NumberField";
 import { PlotlyChart } from "../components/PlotlyChart";
 import {
   buildClusterDefinition,
+  buildClusterPrePostDefinition,
   DEFAULT_CLUSTER_FORM,
+  DEFAULT_PRE_POST,
   mapClusterErrors,
   type ClusterForm,
   type MappedClusterErrors,
+  type PrePostExtras,
 } from "../lib/definition";
 import { fmt, fmtPercent } from "../lib/format";
-import type { ApiError, ClusterResponse, ClusterSampleSizeResponse } from "../types";
+import type {
+  ApiError,
+  ClusterPrePostResponse,
+  ClusterPrePostSampleSizeResponse,
+  ClusterResponse,
+  ClusterSampleSizeResponse,
+} from "../types";
 
 interface PageErrors {
   fields: MappedClusterErrors["fields"];
+  prePost: MappedClusterErrors["prePost"];
   general: ApiError[];
 }
 
-const NO_ERRORS: PageErrors = { fields: {}, general: [] };
+const NO_ERRORS: PageErrors = { fields: {}, prePost: {}, general: [] };
 
 // The sample-size endpoint speaks bare parameter names (p_control, mean_cluster_size, …)
 // rather than definition paths, so map those first; whatever remains goes through the
@@ -49,12 +59,19 @@ function mapPageErrors(errors: ApiError[]): PageErrors {
   }
   const shared = mapClusterErrors(rest);
   // First message wins per field: sample-size paths were mapped first.
-  return { fields: { ...shared.fields, ...fields }, general: shared.general };
+  return {
+    fields: { ...shared.fields, ...fields },
+    prePost: shared.prePost,
+    general: shared.general,
+  };
 }
 
 interface ClusterPlan {
   size: ClusterSampleSizeResponse;
   sim: ClusterResponse;
+  // Present only when the pre/post design was enabled for the run.
+  prePostSize: ClusterPrePostSampleSizeResponse | null;
+  prePostSim: ClusterPrePostResponse | null;
   // Snapshot of the desired power at run time so the heading matches the run, not
   // whatever the form says afterwards.
   targetPower: number;
@@ -62,6 +79,8 @@ interface ClusterPlan {
 
 export function ClusterTrials() {
   const [form, setForm] = useState<ClusterForm>(DEFAULT_CLUSTER_FORM);
+  const [prePostEnabled, setPrePostEnabled] = useState(false);
+  const [prePost, setPrePost] = useState<PrePostExtras>(DEFAULT_PRE_POST);
   const [results, setResults] = useState<ClusterPlan | null>(null);
   const [errors, setErrors] = useState<PageErrors>(NO_ERRORS);
   const [running, setRunning] = useState(false);
@@ -69,6 +88,8 @@ export function ClusterTrials() {
 
   const set = <K extends keyof ClusterForm>(key: K) => (value: ClusterForm[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
+  const setExtra = <K extends keyof PrePostExtras>(key: K) => (value: PrePostExtras[K]) =>
+    setPrePost((current) => ({ ...current, [key]: value }));
 
   // Poisson is fully determined by its mean; only these two families take an SD.
   const needsSd = form.sizeType === "negative_binomial" || form.sizeType === "lognormal";
@@ -81,7 +102,12 @@ export function ClusterTrials() {
     // allSettled so that when BOTH requests fail validation, the errors merge (deduped
     // by code+path) rather than being lost to whichever rejected first (same layering
     // as TrialGoesBadly).
-    const [sizeResult, simResult] = await Promise.allSettled([
+    const requests: [
+      Promise<ClusterSampleSizeResponse>,
+      Promise<ClusterResponse>,
+      Promise<ClusterPrePostSampleSizeResponse> | null,
+      Promise<ClusterPrePostResponse> | null,
+    ] = [
       api.clusterSampleSize({
         p_control: form.controlRisk,
         p_intervention: form.interventionRisk,
@@ -91,14 +117,40 @@ export function ClusterTrials() {
         icc: form.icc,
       }),
       api.cluster(buildClusterDefinition(form)),
-    ]);
-    if (sizeResult.status === "fulfilled" && simResult.status === "fulfilled") {
-      setResults({ size: sizeResult.value, sim: simResult.value, targetPower });
+      prePostEnabled
+        ? api.clusterPrePostSampleSize({
+            p_control: form.controlRisk,
+            p_intervention: form.interventionRisk,
+            alpha: form.alpha,
+            power: form.desiredPower,
+            mean_cluster_size: form.meanClusterSize,
+            icc: form.icc,
+            pre_post_correlation: prePost.prePostCorrelation,
+          })
+        : null,
+      prePostEnabled ? api.clusterPrePost(buildClusterPrePostDefinition(form, prePost)) : null,
+    ];
+    const settled = await Promise.allSettled(
+      requests.map((request) => request ?? Promise.resolve(null)),
+    );
+    const [sizeResult, simResult, prePostSizeResult, prePostSimResult] = settled;
+    if (settled.every((r) => r.status === "fulfilled")) {
+      setResults({
+        size: (sizeResult as PromiseFulfilledResult<ClusterSampleSizeResponse>).value,
+        sim: (simResult as PromiseFulfilledResult<ClusterResponse>).value,
+        prePostSize: (
+          prePostSizeResult as PromiseFulfilledResult<ClusterPrePostSampleSizeResponse | null>
+        ).value,
+        prePostSim: (
+          prePostSimResult as PromiseFulfilledResult<ClusterPrePostResponse | null>
+        ).value,
+        targetPower,
+      });
       setRunning(false);
       return;
     }
     setResults(null);
-    const rejections = [sizeResult, simResult].filter(
+    const rejections = settled.filter(
       (r): r is PromiseRejectedResult => r.status === "rejected",
     );
     const validationErrors = rejections
@@ -258,7 +310,41 @@ export function ClusterTrials() {
             error={errors.fields.randomSeed}
             hint="empty = non-reproducible"
           />
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={prePostEnabled}
+              onChange={(event) => setPrePostEnabled(event.target.checked)}
+              data-testid="pre-post-toggle"
+            />
+            <span>Pre/post design: add baseline observations (SPEC §15)</span>
+          </label>
         </fieldset>
+        {prePostEnabled && (
+          <fieldset>
+            <legend>Pre/post design</legend>
+            <NumberField
+              label="Baseline event risk"
+              value={prePost.baselineRisk}
+              onChange={(v) => setExtra("baselineRisk")(v ?? 0)}
+              min={0}
+              max={1}
+              step={0.01}
+              error={errors.prePost.baselineRisk}
+              hint="shared by both arms (randomized at baseline)"
+            />
+            <NumberField
+              label="Pre/post correlation"
+              value={prePost.prePostCorrelation}
+              onChange={(v) => setExtra("prePostCorrelation")(v ?? 0)}
+              min={0}
+              max={1}
+              step={0.05}
+              error={errors.prePost.prePostCorrelation}
+              hint="correlation of a cluster's baseline and follow-up rates"
+            />
+          </fieldset>
+        )}
         <button type="submit" disabled={running} data-testid="run-button">
           {running ? "Planning…" : "Run cluster planning"}
         </button>
@@ -279,17 +365,161 @@ export function ClusterTrials() {
         </p>
       )}
       {results && (
-        <ClusterResults
-          size={results.size}
-          sim={results.sim}
-          targetPower={results.targetPower}
-        />
+        <>
+          <ClusterResults
+            size={results.size}
+            sim={results.sim}
+            targetPower={results.targetPower}
+          />
+          {results.prePostSize && results.prePostSim && (
+            <PrePostResults
+              size={results.prePostSize}
+              sim={results.prePostSim}
+              targetPower={results.targetPower}
+            />
+          )}
+        </>
       )}
     </section>
   );
 }
 
-function ClusterResults({ size, sim, targetPower }: ClusterPlan) {
+function PrePostResults({
+  size,
+  sim,
+  targetPower,
+}: {
+  size: ClusterPrePostSampleSizeResponse;
+  sim: ClusterPrePostResponse;
+  targetPower: number;
+}) {
+  const { summary, manifest } = sim;
+  const analyses = [
+    {
+      label: "Change score (post − pre), cluster-level t",
+      short: "change score",
+      power: summary.power_change_score,
+      color: "#2563eb",
+      flag: "primary (matches the §15.1 formula)",
+    },
+    {
+      label: "Follow-up only, cluster-level t",
+      short: "follow-up only",
+      power: summary.power_followup_only,
+      color: "#64748b",
+      flag: "ignores baseline observations",
+    },
+  ];
+
+  return (
+    <div data-testid="pre-post-results">
+      <h3>Pre/post design — sample size for {fmtPercent(targetPower, 0)} power</h3>
+      <div className="cards" data-testid="pre-post-size-cards">
+        <Card
+          title="Clusters per arm"
+          value={String(size.clusters_per_arm)}
+          detail="with baseline observations"
+          accent
+        />
+        <Card
+          title="n per arm"
+          value={String(size.n_per_arm)}
+          detail={`unrounded ${fmt(size.n_per_arm_unrounded, 3)}`}
+        />
+      </div>
+      <p className="manifest" data-testid="pre-post-formula">
+        formula: {size.formula}
+      </p>
+
+      <h3>Pre/post simulated design</h3>
+      <div className="cards" data-testid="pre-post-sim-cards">
+        <Card
+          title="Baseline CER / EER"
+          value={`${fmtPercent(summary.mean_baseline_cer)} / ${fmtPercent(
+            summary.mean_baseline_eer,
+          )}`}
+          detail="both arms share the baseline rate"
+        />
+        <Card
+          title="Follow-up CER / EER"
+          value={`${fmtPercent(summary.mean_followup_cer)} / ${fmtPercent(
+            summary.mean_followup_eer,
+          )}`}
+          detail="arm effect applies at follow-up"
+        />
+        <Card
+          title="Mean DiD"
+          value={fmt(summary.mean_did, 3)}
+          detail="control change − intervention change (positive = benefit)"
+        />
+      </div>
+
+      <table data-testid="pre-post-analysis-table">
+        <thead>
+          <tr>
+            <th scope="col">Analysis</th>
+            <th scope="col">Simulated power</th>
+            <th scope="col">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {analyses.map((analysis) => (
+            <tr key={analysis.label}>
+              <th scope="row">{analysis.label}</th>
+              <td>{fmtPercent(analysis.power)}</td>
+              <td>{analysis.flag}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="plots">
+        <PlotlyChart
+          testId="pre-post-powers"
+          data={[
+            {
+              type: "bar",
+              x: analyses.map((a) => a.short),
+              y: analyses.map((a) => a.power),
+              marker: { color: analyses.map((a) => a.color) },
+            },
+          ]}
+          layout={{
+            title: { text: "Pre/post design: change score vs follow-up only" },
+            yaxis: { title: { text: "simulated power" }, range: [0, 1] },
+            showlegend: false,
+          }}
+        />
+      </div>
+
+      {sim.warnings.length > 0 && (
+        <ul className="banner banner-warning" data-testid="pre-post-warnings">
+          {sim.warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      )}
+      {sim.notes.length > 0 && (
+        <ul className="banner banner-note" data-testid="pre-post-notes">
+          {sim.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+      <p className="manifest">
+        {manifest.n_simulations.toLocaleString()} simulations · seed{" "}
+        {manifest.random_seed ?? "none"} · {manifest.rng_algorithm} · spec{" "}
+        {manifest.spec_version} · input {manifest.input_hash.slice(0, 12)}…
+      </p>
+    </div>
+  );
+}
+
+function ClusterResults({
+  size,
+  sim,
+  targetPower,
+}: Pick<ClusterPlan, "size" | "sim" | "targetPower">) {
   const { summary, manifest } = sim;
   // Same order as the engine notes: unadjusted (anti-conservative), design-effect
   // adjusted, cluster-level t-test (SPEC §14.4).

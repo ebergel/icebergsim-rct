@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { ApiError } from "../types";
 import {
   buildClusterDefinition,
+  buildClusterPrePostDefinition,
+  DEFAULT_PRE_POST,
   buildDefinition,
   buildPragmaticDefinition,
   DEFAULT_CLUSTER_FORM,
@@ -258,5 +260,29 @@ describe("mapClusterErrors", () => {
     expect(mapped.fields.sizeSd).toBeDefined();
     expect(mapped.general).toHaveLength(1);
     expect(mapped.general[0].code).toBe("invalid_mode");
+  });
+});
+
+describe("buildClusterPrePostDefinition", () => {
+  it("extends the cluster definition with baseline and correlation", () => {
+    const definition = buildClusterPrePostDefinition(DEFAULT_CLUSTER_FORM, DEFAULT_PRE_POST);
+    expect(definition["mode"]).toBe("cluster_pre_post");
+    expect(definition["baseline_event_probability"]).toBe(0.2);
+    expect(definition["pre_post_correlation"]).toBe(0.5);
+    expect(definition["icc"]).toBe(0.01);
+  });
+});
+
+describe("mapClusterErrors pre/post paths", () => {
+  it("routes correlation and baseline paths to the pre/post fields", () => {
+    const mapped = mapClusterErrors([
+      error("pre_post_correlation", "correlation_out_of_bounds"),
+      error("baseline_event_probability"),
+      error("arms.intervention.event_probability", "cluster_rate_truncation_excessive"),
+    ]);
+    expect(mapped.prePost.prePostCorrelation).toBeDefined();
+    expect(mapped.prePost.baselineRisk).toBeDefined();
+    expect(mapped.fields.interventionRisk).toContain("intervention");
+    expect(mapped.general).toHaveLength(0);
   });
 });

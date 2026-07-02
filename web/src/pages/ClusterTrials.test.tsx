@@ -2,14 +2,25 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiValidationError } from "../api";
-import type { ClusterResponse, ClusterSampleSizeResponse } from "../types";
+import type {
+  ClusterPrePostResponse,
+  ClusterPrePostSampleSizeResponse,
+  ClusterResponse,
+  ClusterSampleSizeResponse,
+} from "../types";
 import { ClusterTrials } from "./ClusterTrials";
 
 vi.mock("../api", async (importOriginal) => {
   const original = await importOriginal<typeof import("../api")>();
   return {
     ...original,
-    api: { ...original.api, clusterSampleSize: vi.fn(), cluster: vi.fn() },
+    api: {
+      ...original.api,
+      clusterSampleSize: vi.fn(),
+      cluster: vi.fn(),
+      clusterPrePostSampleSize: vi.fn(),
+      clusterPrePost: vi.fn(),
+    },
   };
 });
 
@@ -21,6 +32,8 @@ vi.mock("../components/PlotlyChart", () => ({
 const { api } = await import("../api");
 const clusterSampleSize = vi.mocked(api.clusterSampleSize);
 const cluster = vi.mocked(api.cluster);
+const clusterPrePostSampleSize = vi.mocked(api.clusterPrePostSampleSize);
+const clusterPrePost = vi.mocked(api.clusterPrePost);
 
 // Canonical design-effect example: mean cluster size 100, ICC 0.01 ->
 // DE = 1 + 99 * 0.01 = 1.99; adjusted n per arm 196.221 * 1.99 = 390.48; 4 clusters/arm.
@@ -69,6 +82,8 @@ const CLUSTER_RESPONSE: ClusterResponse = {
 beforeEach(() => {
   clusterSampleSize.mockReset();
   cluster.mockReset();
+  clusterPrePostSampleSize.mockReset();
+  clusterPrePost.mockReset();
 });
 
 describe("ClusterTrials", () => {
@@ -189,5 +204,110 @@ describe("ClusterTrials", () => {
       mean_cluster_size: 100,
       cluster_size_distribution: { type: "lognormal", sd: 25 },
     });
+  });
+});
+
+const PRE_POST_SIZE: ClusterPrePostSampleSizeResponse = {
+  n_per_arm_unrounded: 748.472,
+  n_per_arm: 749,
+  clusters_per_arm: 8,
+  formula: "historical_pre_post_cluster (SPEC §15.1)",
+};
+
+const PRE_POST_SIM: ClusterPrePostResponse = {
+  manifest: {
+    input_hash: "d".repeat(64),
+    random_seed: 12345,
+    n_simulations: 5000,
+    rng_algorithm: "PCG64",
+    spec_version: "2.0.0-alpha.1",
+  },
+  design: {
+    control_clusters: 4,
+    intervention_clusters: 4,
+    mean_cluster_size: 100,
+    icc: 0.01,
+    pre_post_correlation: 0.5,
+    baseline_event_probability: 0.2,
+  },
+  summary: {
+    mean_baseline_cer: 0.2,
+    mean_baseline_eer: 0.2,
+    mean_followup_cer: 0.2,
+    mean_followup_eer: 0.1,
+    mean_did: 0.1,
+    power_change_score: 0.62,
+    power_followup_only: 0.55,
+    truncated_rate_fraction: 0,
+  },
+  warnings: [],
+  notes: ["primary analysis: cluster-level change-score ..."],
+};
+
+describe("ClusterTrials pre/post design", () => {
+  it("runs the pre/post pair when enabled and renders the comparison", async () => {
+    clusterSampleSize.mockResolvedValue(SIZE_RESPONSE);
+    cluster.mockResolvedValue(CLUSTER_RESPONSE);
+    clusterPrePostSampleSize.mockResolvedValue(PRE_POST_SIZE);
+    clusterPrePost.mockResolvedValue(PRE_POST_SIM);
+    render(<ClusterTrials />);
+
+    await userEvent.click(screen.getByTestId("pre-post-toggle"));
+    await userEvent.click(screen.getByTestId("run-button"));
+
+    expect(await screen.findByTestId("pre-post-results")).toBeInTheDocument();
+    // Sample-size cards from the §15.1 formula fixture.
+    expect(within(screen.getByTestId("pre-post-size-cards")).getByText("8")).toBeInTheDocument();
+    // Both analyses with fixture powers.
+    const table = screen.getByTestId("pre-post-analysis-table");
+    expect(table).toHaveTextContent("62.0%");
+    expect(table).toHaveTextContent("55.0%");
+    expect(table).toHaveTextContent("matches the §15.1 formula");
+    expect(screen.getByTestId("pre-post-powers")).toBeInTheDocument();
+    // The request carried the pre/post extras.
+    const sent = clusterPrePost.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent["mode"]).toBe("cluster_pre_post");
+    expect(sent["pre_post_correlation"]).toBe(0.5);
+    expect(sent["baseline_event_probability"]).toBe(0.2);
+    expect(clusterPrePostSampleSize.mock.calls[0][0].pre_post_correlation).toBe(0.5);
+  });
+
+  it("does not call the pre/post endpoints when the toggle is off", async () => {
+    clusterSampleSize.mockResolvedValue(SIZE_RESPONSE);
+    cluster.mockResolvedValue(CLUSTER_RESPONSE);
+    render(<ClusterTrials />);
+    await userEvent.click(screen.getByTestId("run-button"));
+    expect(await screen.findByTestId("results")).toBeInTheDocument();
+    expect(clusterPrePost).not.toHaveBeenCalled();
+    expect(clusterPrePostSampleSize).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("pre-post-results")).not.toBeInTheDocument();
+  });
+
+  it("marks the correlation field on a pre/post 422", async () => {
+    clusterSampleSize.mockResolvedValue(SIZE_RESPONSE);
+    cluster.mockResolvedValue(CLUSTER_RESPONSE);
+    clusterPrePostSampleSize.mockResolvedValue(PRE_POST_SIZE);
+    clusterPrePost.mockRejectedValue(
+      new ApiValidationError([
+        {
+          type: "ValidationError",
+          code: "correlation_out_of_bounds",
+          message: "pre_post_correlation must be a number in [0, 1].",
+          path: "pre_post_correlation",
+          details: {},
+        },
+      ]),
+    );
+    render(<ClusterTrials />);
+    await userEvent.click(screen.getByTestId("pre-post-toggle"));
+    await userEvent.click(screen.getByTestId("run-button"));
+
+    const message = await screen.findByRole("alert");
+    expect(message).toHaveTextContent("must be a number in [0, 1]");
+    expect(screen.getByLabelText("Pre/post correlation")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(screen.queryByTestId("pre-post-results")).not.toBeInTheDocument();
   });
 });

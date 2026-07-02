@@ -16,6 +16,10 @@ from fastapi.responses import JSONResponse
 
 from icebergsim._version import SPEC_VERSION
 from icebergsim.cluster import simulate_cluster_post_only, validate_cluster_trial
+from icebergsim.cluster_pre_post import (
+    simulate_cluster_pre_post,
+    validate_cluster_pre_post_trial,
+)
 from icebergsim.io import load_definition, result_to_dict, summary_to_dict, to_json_safe
 from icebergsim.model import ValidationError, validation_error
 from icebergsim.plots import (
@@ -28,6 +32,7 @@ from icebergsim.plots import (
 from icebergsim.rng import RNG_ALGORITHM
 from icebergsim.sample_size import (
     calculate_cluster_post_sample_size,
+    calculate_cluster_pre_post_sample_size,
     calculate_two_arm_sample_size,
 )
 from icebergsim.simulate import (
@@ -193,6 +198,59 @@ def _add_planning_routes(router: APIRouter) -> None:
         if isinstance(result, tuple):
             return _errors_response(result)
         return dataclasses.asdict(result)
+
+    @router.post("/sample-size/cluster-pre-post")
+    def sample_size_cluster_pre_post(params: dict[str, Any]) -> Any:
+        numbers, errors = _read_numbers(
+            params,
+            required=("p_control", "p_intervention", "mean_cluster_size", "icc",
+                      "pre_post_correlation"),
+            optional={"alpha": 0.05, "power": 0.80},
+        )
+        if errors:
+            return _errors_response(tuple(errors))
+        result = calculate_cluster_pre_post_sample_size(
+            p_control=numbers["p_control"],
+            p_intervention=numbers["p_intervention"],
+            alpha=numbers["alpha"],
+            power=numbers["power"],
+            alternative=str(params.get("alternative", "two_sided")),
+            mean_cluster_size=numbers["mean_cluster_size"],
+            icc=numbers["icc"],
+            pre_post_correlation=numbers["pre_post_correlation"],
+        )
+        if isinstance(result, tuple):
+            return _errors_response(result)
+        return dataclasses.asdict(result)
+
+    @router.post("/cluster-pre-post")
+    def cluster_pre_post(definition: dict[str, Any]) -> Any:
+        validated = validate_cluster_pre_post_trial(definition)
+        if isinstance(validated, tuple):
+            return _errors_response(validated)
+        result = simulate_cluster_pre_post(validated)
+        return to_json_safe(
+            {
+                "manifest": {
+                    "input_hash": result.input_hash,
+                    "random_seed": result.random_seed,
+                    "n_simulations": result.n_simulations,
+                    "rng_algorithm": result.rng_algorithm,
+                    "spec_version": result.spec_version,
+                },
+                "design": {
+                    "control_clusters": validated.control_clusters,
+                    "intervention_clusters": validated.intervention_clusters,
+                    "mean_cluster_size": validated.mean_cluster_size,
+                    "icc": validated.icc,
+                    "pre_post_correlation": validated.pre_post_correlation,
+                    "baseline_event_probability": validated.baseline_event_probability,
+                },
+                "summary": dataclasses.asdict(result.summary),
+                "warnings": list(result.warnings),
+                "notes": list(result.notes),
+            }
+        )
 
     @router.post("/cluster")
     def cluster(definition: dict[str, Any]) -> Any:

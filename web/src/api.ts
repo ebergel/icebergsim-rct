@@ -8,6 +8,8 @@ import type {
   PowerCurveResponse,
   SampleSizeResponse,
   SimulationResponse,
+  ClusterPrePostResponse,
+  ClusterPrePostSampleSizeResponse,
   ClusterResponse,
   ClusterSampleSizeResponse,
   StoppingResponse,
@@ -90,4 +92,16 @@ export const api = {
   }): Promise<ClusterSampleSizeResponse> => post("/api/sample-size/cluster", params),
   cluster: (definition: TrialDefinition): Promise<ClusterResponse> =>
     post("/api/cluster", definition),
+  clusterPrePostSampleSize: (params: {
+    p_control: number;
+    p_intervention: number;
+    alpha: number;
+    power: number;
+    mean_cluster_size: number;
+    icc: number;
+    pre_post_correlation: number;
+  }): Promise<ClusterPrePostSampleSizeResponse> =>
+    post("/api/sample-size/cluster-pre-post", params),
+  clusterPrePost: (definition: TrialDefinition): Promise<ClusterPrePostResponse> =>
+    post("/api/cluster-pre-post", definition),
 };

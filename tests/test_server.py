@@ -354,6 +354,81 @@ def test_cluster_simulation_rejects_bad_definitions(client: TestClient) -> None:
     assert any(e["code"] == "invalid_mode" for e in wrong_mode.json()["errors"])
 
 
+def pre_post_payload(**overrides: Any) -> dict[str, Any]:
+    raw = cluster_payload(
+        id="pre_post_ui",
+        mode="cluster_pre_post",
+        baseline_event_probability=0.20,
+        pre_post_correlation=0.5,
+    )
+    raw["clusters"]["control_clusters"] = 8
+    raw["clusters"]["intervention_clusters"] = 8
+    raw.update(overrides)
+    return raw
+
+
+def test_cluster_pre_post_sample_size_contract(client: TestClient) -> None:
+    response = client.post(
+        "/api/sample-size/cluster-pre-post",
+        json={
+            "p_control": 0.20,
+            "p_intervention": 0.10,
+            "alpha": 0.05,
+            "power": 0.80,
+            "mean_cluster_size": 100,
+            "icc": 0.01,
+            "pre_post_correlation": 0.5,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["clusters_per_arm"] == 8
+    assert body["n_per_arm"] > 0
+    assert "formula" in body
+    missing = client.post("/api/sample-size/cluster-pre-post", json={"p_control": 0.2})
+    assert missing.status_code == 422
+
+
+def test_cluster_pre_post_simulation_contract(client: TestClient) -> None:
+    response = client.post("/api/cluster-pre-post", json=pre_post_payload())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["design"]["pre_post_correlation"] == 0.5
+    assert body["design"]["baseline_event_probability"] == 0.20
+    summary = body["summary"]
+    assert 0.0 <= summary["power_change_score"] <= 1.0
+    assert 0.0 <= summary["power_followup_only"] <= 1.0
+    assert abs(summary["mean_baseline_cer"] - 0.20) < 0.02
+    assert abs(summary["mean_followup_eer"] - 0.10) < 0.02
+    assert summary["mean_did"] > 0.05
+    assert any("change-score" in note for note in body["notes"])
+    assert body["manifest"]["rng_algorithm"] == "PCG64"
+    assert "NaN" not in response.text
+
+
+def test_cluster_pre_post_rejections(client: TestClient) -> None:
+    bad_corr = client.post(
+        "/api/cluster-pre-post", json=pre_post_payload(pre_post_correlation=1.5)
+    )
+    assert bad_corr.status_code == 422
+    assert any(e["code"] == "correlation_out_of_bounds" for e in bad_corr.json()["errors"])
+    truncating = client.post(
+        "/api/cluster-pre-post",
+        json=pre_post_payload(
+            arms={
+                "control": {"event_probability": 0.03},
+                "intervention": {"event_probability": 0.03},
+            },
+            baseline_event_probability=0.03,
+            icc=0.20,
+        ),
+    )
+    assert truncating.status_code == 422
+    assert any(
+        e["code"] == "cluster_rate_truncation_excessive" for e in truncating.json()["errors"]
+    )
+
+
 def test_simulate_response_is_strict_json(client: TestClient) -> None:
     """NaN must never leak into the wire format (undefined -> null)."""
     lossy: dict[str, Any] = make_raw(

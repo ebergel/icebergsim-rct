@@ -230,3 +230,42 @@ export interface ClusterResponse {
   summary: ClusterSummaryT;
   notes: string[];
 }
+
+export interface ClusterPrePostSampleSizeResponse {
+  n_per_arm_unrounded: number;
+  n_per_arm: number;
+  clusters_per_arm: number;
+  formula: string;
+}
+
+export interface ClusterPrePostSummaryT {
+  mean_baseline_cer: number | null;
+  mean_baseline_eer: number | null;
+  mean_followup_cer: number | null;
+  mean_followup_eer: number | null;
+  mean_did: number | null;
+  power_change_score: number;
+  power_followup_only: number;
+  truncated_rate_fraction: number;
+}
+
+export interface ClusterPrePostResponse {
+  manifest: {
+    input_hash: string;
+    random_seed: number | null;
+    n_simulations: number;
+    rng_algorithm: string;
+    spec_version: string;
+  };
+  design: {
+    control_clusters: number;
+    intervention_clusters: number;
+    mean_cluster_size: number;
+    icc: number;
+    pre_post_correlation: number;
+    baseline_event_probability: number;
+  };
+  summary: ClusterPrePostSummaryT;
+  warnings: string[];
+  notes: string[];
+}
