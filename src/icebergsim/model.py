@@ -36,6 +36,13 @@ class ValidationError:
     details: Mapping[str, Any] = field(default_factory=dict)
 
 
+def validation_error(
+    code: str, message: str, path: str, details: Mapping[str, Any] | None = None
+) -> ValidationError:
+    """Convenience constructor used by all validation stages."""
+    return ValidationError(code=code, message=message, path=path, details=details or {})
+
+
 @dataclass(frozen=True, slots=True)
 class ImperfectionDefinition:
     """Per-assigned-arm trial imperfections with spec defaults (SPEC §4.2)."""
@@ -121,6 +128,41 @@ class DerivedLossProbabilities:
 
     p_lost: float
     p_nonlost: float
+
+
+@dataclass(frozen=True, slots=True)
+class TwoArmSampleSizeResult:
+    """Formula sample size for two independent proportions (SPEC §10)."""
+
+    n_control: int
+    n_intervention: int
+    n_total: int
+    unrounded_n_control: float
+    unrounded_n_intervention: float
+    allocation_ratio_intervention_to_control: float
+    formula: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterPostSampleSizeResult:
+    """Design-effect adjusted sample size for post-only cluster trials (SPEC §14.2)."""
+
+    individual_n_per_arm_unrounded: float
+    design_effect: float
+    cluster_adjusted_n_per_arm_unrounded: float
+    n_per_arm_cluster_adjusted: int
+    clusters_per_arm: int
+    formula: str
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterPrePostSampleSizeResult:
+    """Pre/post cluster sample size using the historical formula (SPEC §15.1)."""
+
+    n_per_arm_unrounded: float
+    n_per_arm: int
+    clusters_per_arm: int
+    formula: str
 
 
 @dataclass(frozen=True, slots=True)

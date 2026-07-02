@@ -15,6 +15,10 @@ from typing import Any
 
 from icebergsim.analysis import analyze_2x2
 from icebergsim.model import Table2x2, ValidationError
+from icebergsim.sample_size import (
+    calculate_cluster_post_sample_size,
+    calculate_two_arm_sample_size,
+)
 from icebergsim.validate import derive_loss_probabilities, validate_trial_definition
 from spec_harness import Adapter
 
@@ -80,8 +84,53 @@ def _adapt_analyze_2x2(case_input: Mapping[str, Any]) -> Mapping[str, Any]:
     }
 
 
+def _adapt_two_arm_sample_size(case_input: Mapping[str, Any]) -> Mapping[str, Any]:
+    result = calculate_two_arm_sample_size(
+        p_control=case_input["p_control"],
+        p_intervention=case_input["p_intervention"],
+        alpha=case_input.get("alpha", 0.05),
+        power=case_input.get("power", 0.80),
+        alternative=case_input.get("alternative", "two_sided"),
+        allocation_ratio_intervention_to_control=case_input.get(
+            "allocation_ratio_intervention_to_control", 1.0
+        ),
+    )
+    if isinstance(result, tuple):
+        return _error_payload(result)
+    out: dict[str, Any] = {
+        "n_control": result.n_control,
+        "n_intervention": result.n_intervention,
+        "n_total": result.n_total,
+    }
+    if result.allocation_ratio_intervention_to_control == 1.0:
+        out["unrounded_n_per_arm"] = result.unrounded_n_control
+    return out
+
+
+def _adapt_cluster_post_sample_size(case_input: Mapping[str, Any]) -> Mapping[str, Any]:
+    result = calculate_cluster_post_sample_size(
+        p_control=case_input["p_control"],
+        p_intervention=case_input["p_intervention"],
+        alpha=case_input.get("alpha", 0.05),
+        power=case_input.get("power", 0.80),
+        alternative=case_input.get("alternative", "two_sided"),
+        mean_cluster_size=case_input["mean_cluster_size"],
+        icc=case_input["icc"],
+    )
+    if isinstance(result, tuple):
+        return _error_payload(result)
+    return {
+        "individual_n_per_arm_unrounded": result.individual_n_per_arm_unrounded,
+        "design_effect": result.design_effect,
+        "cluster_adjusted_n_per_arm_unrounded": result.cluster_adjusted_n_per_arm_unrounded,
+        "clusters_per_arm": result.clusters_per_arm,
+    }
+
+
 ADAPTERS: dict[tuple[str, str], Adapter] = {
     ("derived_probabilities", "loss_adjustment"): _adapt_loss_adjustment,
     ("individual_simulation", "validate_trial_definition"): _adapt_validate_trial_definition,
     ("analysis", "analyze_2x2"): _adapt_analyze_2x2,
+    ("sample_size", "calculate_two_arm_sample_size"): _adapt_two_arm_sample_size,
+    ("cluster", "sample_size_cluster_post"): _adapt_cluster_post_sample_size,
 }

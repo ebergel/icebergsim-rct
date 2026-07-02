@@ -22,6 +22,9 @@ from icebergsim.model import (
     ValidatedTrial,
     ValidationError,
 )
+from icebergsim.model import (
+    validation_error as _error,
+)
 
 Errors = tuple[ValidationError, ...]
 
@@ -349,12 +352,6 @@ def _check_derived_probabilities(
 
 
 # --- helpers --------------------------------------------------------------------------------
-
-
-def _error(
-    code: str, message: str, path: str, details: Mapping[str, Any] | None = None
-) -> ValidationError:
-    return ValidationError(code=code, message=message, path=path, details=details or {})
 
 
 def _round_half_up(value: float) -> int:
