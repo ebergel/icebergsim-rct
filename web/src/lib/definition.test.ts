@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ApiError } from "../types";
-import { buildDefinition, DEFAULT_FORM, mapErrorsToFields } from "./definition";
+import {
+  buildDefinition,
+  buildPragmaticDefinition,
+  DEFAULT_FORM,
+  IDEAL_IMPERFECTIONS,
+  mapErrorsToFields,
+  mapImperfectionErrors,
+  powerCurveSizes,
+} from "./definition";
 
 describe("buildDefinition", () => {
   it("produces a schema-shaped individual_binary definition", () => {
@@ -57,5 +65,65 @@ describe("mapErrorsToFields", () => {
       error("allocation", "sample_size_not_positive"),
     ]);
     expect(mapped.fields.totalN).toBe("bad allocation.total_n");
+  });
+});
+
+describe("buildPragmaticDefinition", () => {
+  it("adds wire-format imperfection blocks for both arms", () => {
+    const definition = buildPragmaticDefinition(
+      DEFAULT_FORM,
+      { ...IDEAL_IMPERFECTIONS, lossProbability: 0.1, noncomplianceProbability: 0.2 },
+      IDEAL_IMPERFECTIONS,
+    );
+    expect(definition["imperfections"]).toEqual({
+      control: {
+        loss_probability: 0.1,
+        lost_event_risk_ratio: 1,
+        noncompliance_probability: 0.2,
+        crossover_probability: 0,
+        ascertainment_event_probability: 1,
+        ascertainment_nonevent_false_positive_probability: 0,
+      },
+      intervention: {
+        loss_probability: 0,
+        lost_event_risk_ratio: 1,
+        noncompliance_probability: 0,
+        crossover_probability: 0,
+        ascertainment_event_probability: 1,
+        ascertainment_nonevent_false_positive_probability: 0,
+      },
+    });
+  });
+});
+
+describe("mapImperfectionErrors", () => {
+  it("routes per-arm imperfection paths to arm fields", () => {
+    const mapped = mapImperfectionErrors([
+      error("imperfections.control.lost_event_risk_ratio", "derived_probability_out_of_bounds"),
+      error("imperfections.intervention.loss_probability"),
+      error("alpha", "alpha_out_of_bounds"),
+    ]);
+    expect(mapped.control.lostEventRiskRatio).toContain("lost_event_risk_ratio");
+    expect(mapped.intervention.lossProbability).toContain("loss_probability");
+    expect(mapped.rest).toHaveLength(1);
+    expect(mapped.rest[0].path).toBe("alpha");
+  });
+});
+
+describe("powerCurveSizes", () => {
+  it("brackets the formula size with even, deduplicated, sorted totals", () => {
+    expect(powerCurveSizes(394)).toEqual([198, 296, 394, 492, 592]);
+  });
+
+  it("never goes below a simulable size", () => {
+    expect(powerCurveSizes(4)[0]).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("ratioToInterventionFraction", () => {
+  it("converts allocation ratios to fractions", async () => {
+    const { ratioToInterventionFraction } = await import("./definition");
+    expect(ratioToInterventionFraction(1)).toBe(0.5);
+    expect(ratioToInterventionFraction(2)).toBeCloseTo(2 / 3, 12);
   });
 });

@@ -88,3 +88,30 @@ export interface ExampleInfo {
 
 // A raw trial definition, as sent to /api/validate and /api/simulate.
 export type TrialDefinition = Record<string, unknown>;
+
+export interface SampleSizeResponse {
+  n_control: number;
+  n_intervention: number;
+  n_total: number;
+  unrounded_n_control: number;
+  unrounded_n_intervention: number;
+  allocation_ratio_intervention_to_control: number;
+  formula: string;
+}
+
+export interface PowerCurvePoint {
+  total_n: number;
+  n_control: number;
+  n_intervention: number;
+  power: number;
+  power_mcse: number;
+}
+
+export interface PowerCurveResponse {
+  input_hash: string;
+  random_seed: number | null;
+  rng_algorithm: string;
+  spec_version: string;
+  points: PowerCurvePoint[];
+  plot: { total_n: number[]; power: number[]; power_mcse: number[] };
+}

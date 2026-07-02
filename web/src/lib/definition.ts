@@ -78,3 +78,89 @@ export function mapErrorsToFields(errors: ApiError[]): MappedErrors {
   }
   return { fields, general };
 }
+
+// --- imperfections (SPEC §17.2 "what if the trial goes badly?") ------------------------------
+
+export interface ImperfectionForm {
+  lossProbability: number;
+  lostEventRiskRatio: number;
+  noncomplianceProbability: number;
+  crossoverProbability: number;
+  ascertainmentEventProbability: number;
+  ascertainmentFalsePositiveProbability: number;
+}
+
+// Engine defaults (SPEC §4.2): a perfect arm.
+export const IDEAL_IMPERFECTIONS: ImperfectionForm = {
+  lossProbability: 0,
+  lostEventRiskRatio: 1,
+  noncomplianceProbability: 0,
+  crossoverProbability: 0,
+  ascertainmentEventProbability: 1,
+  ascertainmentFalsePositiveProbability: 0,
+};
+
+const IMPERFECTION_KEYS: [keyof ImperfectionForm, string][] = [
+  ["lossProbability", "loss_probability"],
+  ["lostEventRiskRatio", "lost_event_risk_ratio"],
+  ["noncomplianceProbability", "noncompliance_probability"],
+  ["crossoverProbability", "crossover_probability"],
+  ["ascertainmentEventProbability", "ascertainment_event_probability"],
+  ["ascertainmentFalsePositiveProbability", "ascertainment_nonevent_false_positive_probability"],
+];
+
+export function buildPragmaticDefinition(
+  form: QuickTrialForm,
+  control: ImperfectionForm,
+  intervention: ImperfectionForm,
+): TrialDefinition {
+  return {
+    ...buildDefinition(form),
+    id: "pragmatic_trial",
+    label: "Pragmatic trial with imperfections",
+    imperfections: {
+      control: imperfectionsPayload(control),
+      intervention: imperfectionsPayload(intervention),
+    },
+  };
+}
+
+function imperfectionsPayload(form: ImperfectionForm): Record<string, number> {
+  return Object.fromEntries(IMPERFECTION_KEYS.map(([key, wire]) => [wire, form[key]]));
+}
+
+export interface MappedImperfectionErrors {
+  control: Partial<Record<keyof ImperfectionForm, string>>;
+  intervention: Partial<Record<keyof ImperfectionForm, string>>;
+  rest: ApiError[];
+}
+
+export function mapImperfectionErrors(errors: ApiError[]): MappedImperfectionErrors {
+  const mapped: MappedImperfectionErrors = { control: {}, intervention: {}, rest: [] };
+  for (const error of errors) {
+    const match = error.path.match(/^imperfections\.(control|intervention)\.(\w+)/);
+    const key = match && IMPERFECTION_KEYS.find(([, wire]) => wire === match[2])?.[0];
+    if (match && key) {
+      const arm = match[1] as "control" | "intervention";
+      if (mapped[arm][key] === undefined) mapped[arm][key] = error.message;
+    } else {
+      mapped.rest.push(error);
+    }
+  }
+  return mapped;
+}
+
+// --- power curve sizes (SPEC §17.3) -----------------------------------------------------------
+
+// Sample sizes bracketing a formula result, for the power-over-n chart. Presentation
+// choice only — the power values themselves come from the engine.
+export function powerCurveSizes(totalN: number): number[] {
+  const fractions = [0.5, 0.75, 1.0, 1.25, 1.5];
+  const sizes = fractions.map((f) => Math.max(4, 2 * Math.round((totalN * f) / 2)));
+  return [...new Set(sizes)].sort((a, b) => a - b);
+}
+
+// Allocation ratio r = n_intervention / n_control <-> intervention fraction (SPEC §10.2/§4.1).
+export function ratioToInterventionFraction(ratio: number): number {
+  return ratio / (1 + ratio);
+}

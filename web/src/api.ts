@@ -5,6 +5,8 @@ import type {
   ApiError,
   ExampleInfo,
   Meta,
+  PowerCurveResponse,
+  SampleSizeResponse,
   SimulationResponse,
   TrialDefinition,
   ValidateResponse,
@@ -52,4 +54,17 @@ export const api = {
     const query = params.size > 0 ? `?${params.toString()}` : "";
     return post(`/api/simulate${query}`, definition);
   },
+  sampleSizeTwoArm: (params: {
+    p_control: number;
+    p_intervention: number;
+    alpha: number;
+    power: number;
+    alternative?: string;
+    allocation_ratio_intervention_to_control?: number;
+  }): Promise<SampleSizeResponse> => post("/api/sample-size/two-arm", params),
+  powerCurve: (
+    definition: TrialDefinition,
+    totalSampleSizes: number[],
+  ): Promise<PowerCurveResponse> =>
+    post("/api/power-curve", { definition, total_sample_sizes: totalSampleSizes }),
 };

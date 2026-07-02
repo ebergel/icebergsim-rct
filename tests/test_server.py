@@ -110,6 +110,71 @@ def test_api_reachable_without_built_spa() -> None:
         assert client.get("/api/meta").status_code == 200
 
 
+def test_sample_size_two_arm_canonical(client: TestClient) -> None:
+    response = client.post(
+        "/api/sample-size/two-arm",
+        json={"p_control": 0.20, "p_intervention": 0.10, "alpha": 0.05, "power": 0.80},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["n_control"] == 197
+    assert body["n_intervention"] == 197
+    assert body["n_total"] == 394
+    assert abs(body["unrounded_n_control"] - 196.22199335872716) < 1e-9
+    assert "formula" in body
+
+
+def test_sample_size_two_arm_rejects_bad_inputs(client: TestClient) -> None:
+    equal = client.post(
+        "/api/sample-size/two-arm", json={"p_control": 0.2, "p_intervention": 0.2}
+    )
+    assert equal.status_code == 422
+    assert any(e["code"] == "effect_size_zero" for e in equal.json()["errors"])
+    wrong_type = client.post(
+        "/api/sample-size/two-arm", json={"p_control": "high", "p_intervention": 0.1}
+    )
+    assert wrong_type.status_code == 422
+    assert any(e["code"] == "invalid_type" for e in wrong_type.json()["errors"])
+    missing = client.post("/api/sample-size/two-arm", json={"p_control": 0.2})
+    assert missing.status_code == 422
+    assert any(e["code"] == "missing_field" for e in missing.json()["errors"])
+
+
+def test_power_curve_contract(client: TestClient) -> None:
+    response = client.post(
+        "/api/power-curve",
+        json={
+            "definition": make_raw(n_simulations=500),
+            "total_sample_sizes": [100, 400],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert [p["total_n"] for p in body["points"]] == [100, 400]
+    assert all(0.0 <= p["power"] <= 1.0 for p in body["points"])
+    assert body["plot"]["total_n"] == [100, 400]
+    assert body["plot"]["power"] == [p["power"] for p in body["points"]]
+    assert body["rng_algorithm"] == "PCG64"
+
+
+def test_power_curve_rejects_bad_requests(client: TestClient) -> None:
+    no_sizes = client.post("/api/power-curve", json={"definition": make_raw()})
+    assert no_sizes.status_code == 422
+    assert any(e["code"] == "missing_field" for e in no_sizes.json()["errors"])
+    bad_sizes = client.post(
+        "/api/power-curve",
+        json={"definition": make_raw(), "total_sample_sizes": [0, 400]},
+    )
+    assert bad_sizes.status_code == 422
+    assert any(e["code"] == "power_curve_sizes_invalid" for e in bad_sizes.json()["errors"])
+    bad_definition = client.post(
+        "/api/power-curve",
+        json={"definition": make_raw(alpha=7), "total_sample_sizes": [100]},
+    )
+    assert bad_definition.status_code == 422
+    assert any(e["code"] == "alpha_out_of_bounds" for e in bad_definition.json()["errors"])
+
+
 def test_simulate_response_is_strict_json(client: TestClient) -> None:
     """NaN must never leak into the wire format (undefined -> null)."""
     lossy: dict[str, Any] = make_raw(
