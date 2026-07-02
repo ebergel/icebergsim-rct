@@ -8,6 +8,8 @@ import type {
   PowerCurveResponse,
   SampleSizeResponse,
   SimulationResponse,
+  ClusterResponse,
+  ClusterSampleSizeResponse,
   StoppingResponse,
   SubgroupsResponse,
   TrialDefinition,
@@ -78,4 +80,14 @@ export const api = {
   },
   subgroups: (family: Record<string, unknown>): Promise<SubgroupsResponse> =>
     post("/api/subgroups", family),
+  clusterSampleSize: (params: {
+    p_control: number;
+    p_intervention: number;
+    alpha: number;
+    power: number;
+    mean_cluster_size: number;
+    icc: number;
+  }): Promise<ClusterSampleSizeResponse> => post("/api/sample-size/cluster", params),
+  cluster: (definition: TrialDefinition): Promise<ClusterResponse> =>
+    post("/api/cluster", definition),
 };

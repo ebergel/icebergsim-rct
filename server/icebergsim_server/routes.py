@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from icebergsim._version import SPEC_VERSION
+from icebergsim.cluster import simulate_cluster_post_only, validate_cluster_trial
 from icebergsim.io import load_definition, result_to_dict, summary_to_dict, to_json_safe
 from icebergsim.model import ValidationError, validation_error
 from icebergsim.plots import (
@@ -25,7 +26,10 @@ from icebergsim.plots import (
     subgroup_forest,
 )
 from icebergsim.rng import RNG_ALGORITHM
-from icebergsim.sample_size import calculate_two_arm_sample_size
+from icebergsim.sample_size import (
+    calculate_cluster_post_sample_size,
+    calculate_two_arm_sample_size,
+)
 from icebergsim.simulate import (
     PowerCurveResult,
     SimulationResult,
@@ -49,7 +53,14 @@ Errors = tuple[ValidationError, ...]
 
 def api_router(examples_dir: Path) -> APIRouter:
     router = APIRouter(prefix="/api")
+    _add_discovery_routes(router, examples_dir)
+    _add_trial_routes(router)
+    _add_planning_routes(router)
+    _add_advanced_routes(router)
+    return router
 
+
+def _add_discovery_routes(router: APIRouter, examples_dir: Path) -> None:
     @router.get("/meta")
     def meta() -> dict[str, Any]:
         return {
@@ -85,6 +96,8 @@ def api_router(examples_dir: Path) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"unknown example {name!r}")
         return load_definition(known[name])
 
+
+def _add_trial_routes(router: APIRouter) -> None:
     @router.post("/validate")
     def validate(definition: dict[str, Any]) -> Any:
         result = validate_trial_definition(definition)
@@ -108,6 +121,8 @@ def api_router(examples_dir: Path) -> APIRouter:
         result = simulate_trial(validated, include_type_i_error=include_type_i_error)
         return _simulation_payload(result, include_arrays=include_arrays)
 
+
+def _add_planning_routes(router: APIRouter) -> None:
     @router.post("/sample-size/two-arm")
     def sample_size_two_arm(params: dict[str, Any]) -> Any:
         numbers, errors = _read_numbers(
@@ -157,6 +172,57 @@ def api_router(examples_dir: Path) -> APIRouter:
         payload["plot"] = dataclasses.asdict(power_curve_data(curve))
         return payload
 
+    @router.post("/sample-size/cluster")
+    def sample_size_cluster(params: dict[str, Any]) -> Any:
+        numbers, errors = _read_numbers(
+            params,
+            required=("p_control", "p_intervention", "mean_cluster_size", "icc"),
+            optional={"alpha": 0.05, "power": 0.80},
+        )
+        if errors:
+            return _errors_response(tuple(errors))
+        result = calculate_cluster_post_sample_size(
+            p_control=numbers["p_control"],
+            p_intervention=numbers["p_intervention"],
+            alpha=numbers["alpha"],
+            power=numbers["power"],
+            alternative=str(params.get("alternative", "two_sided")),
+            mean_cluster_size=numbers["mean_cluster_size"],
+            icc=numbers["icc"],
+        )
+        if isinstance(result, tuple):
+            return _errors_response(result)
+        return dataclasses.asdict(result)
+
+    @router.post("/cluster")
+    def cluster(definition: dict[str, Any]) -> Any:
+        validated = validate_cluster_trial(definition)
+        if isinstance(validated, tuple):
+            return _errors_response(validated)
+        result = simulate_cluster_post_only(validated)
+        return to_json_safe(
+            {
+                "manifest": {
+                    "input_hash": result.input_hash,
+                    "random_seed": result.random_seed,
+                    "n_simulations": result.n_simulations,
+                    "rng_algorithm": result.rng_algorithm,
+                    "spec_version": result.spec_version,
+                },
+                "design": {
+                    "control_clusters": validated.control_clusters,
+                    "intervention_clusters": validated.intervention_clusters,
+                    "mean_cluster_size": validated.mean_cluster_size,
+                    "icc": validated.icc,
+                    "size_distribution": dataclasses.asdict(validated.size_distribution),
+                },
+                "summary": dataclasses.asdict(result.summary),
+                "notes": list(result.notes),
+            }
+        )
+
+
+def _add_advanced_routes(router: APIRouter) -> None:
     @router.post("/stopping")
     def stopping(
         definition: dict[str, Any],
@@ -230,8 +296,6 @@ def api_router(examples_dir: Path) -> APIRouter:
                 ],
             }
         )
-
-    return router
 
 
 def _read_numbers(

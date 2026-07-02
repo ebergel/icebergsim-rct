@@ -338,3 +338,96 @@ export function mapSubgroupErrors(errors: ApiError[]): MappedSubgroupErrors {
   }
   return { rows, general };
 }
+
+// --- cluster trials (SPEC §17.5 / §14) -----------------------------------------------------------
+
+export interface ClusterForm {
+  controlClusters: number;
+  interventionClusters: number;
+  meanClusterSize: number;
+  sizeType: "fixed" | "poisson" | "negative_binomial" | "lognormal";
+  sizeSd: number | null;
+  icc: number;
+  controlRisk: number;
+  interventionRisk: number;
+  alpha: number;
+  desiredPower: number;
+  nSimulations: number;
+  randomSeed: number | null;
+}
+
+export const DEFAULT_CLUSTER_FORM: ClusterForm = {
+  controlClusters: 4,
+  interventionClusters: 4,
+  meanClusterSize: 100,
+  sizeType: "fixed",
+  sizeSd: null,
+  icc: 0.01,
+  controlRisk: 0.2,
+  interventionRisk: 0.1,
+  alpha: 0.05,
+  desiredPower: 0.8,
+  nSimulations: 5000,
+  randomSeed: 12345,
+};
+
+export function buildClusterDefinition(form: ClusterForm): TrialDefinition {
+  const distribution: Record<string, unknown> = { type: form.sizeType };
+  if (form.sizeType !== "fixed" && form.sizeSd !== null) {
+    distribution["sd"] = form.sizeSd;
+  }
+  return {
+    schema_version: "icebergsim.trial.v2",
+    id: "cluster_trial",
+    label: "Post-only cluster randomized trial",
+    mode: "cluster_post",
+    n_simulations: form.nSimulations,
+    random_seed: form.randomSeed,
+    alpha: form.alpha,
+    arms: {
+      control: { label: "Control clusters", event_probability: form.controlRisk },
+      intervention: { label: "Intervention clusters", event_probability: form.interventionRisk },
+    },
+    clusters: {
+      control_clusters: form.controlClusters,
+      intervention_clusters: form.interventionClusters,
+      mean_cluster_size: form.meanClusterSize,
+      cluster_size_distribution: distribution,
+    },
+    icc: form.icc,
+  };
+}
+
+const CLUSTER_PATH_TO_FIELD: [string, keyof ClusterForm][] = [
+  ["clusters.control_clusters", "controlClusters"],
+  ["clusters.intervention_clusters", "interventionClusters"],
+  ["clusters.mean_cluster_size", "meanClusterSize"],
+  ["clusters.cluster_size_distribution.sd", "sizeSd"],
+  ["clusters.cluster_size_distribution.type", "sizeType"],
+  ["arms.control.event_probability", "controlRisk"],
+  ["arms.intervention.event_probability", "interventionRisk"],
+  ["icc", "icc"],
+  ["alpha", "alpha"],
+  ["power", "desiredPower"],
+  ["n_simulations", "nSimulations"],
+  ["random_seed", "randomSeed"],
+];
+
+export interface MappedClusterErrors {
+  fields: Partial<Record<keyof ClusterForm, string>>;
+  general: ApiError[];
+}
+
+export function mapClusterErrors(errors: ApiError[]): MappedClusterErrors {
+  const fields: MappedClusterErrors["fields"] = {};
+  const general: ApiError[] = [];
+  for (const error of errors) {
+    const match = CLUSTER_PATH_TO_FIELD.find(([prefix]) => error.path.startsWith(prefix));
+    if (match && fields[match[1]] === undefined) {
+      fields[match[1]] = error.message;
+    } else if (!match) {
+      general.push(error);
+    }
+  }
+  return { fields, general };
+}

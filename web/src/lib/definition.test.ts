@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ApiError } from "../types";
 import {
+  buildClusterDefinition,
   buildDefinition,
   buildPragmaticDefinition,
+  DEFAULT_CLUSTER_FORM,
+  mapClusterErrors,
   buildStoppingDefinition,
   buildSubgroupFamily,
   DEFAULT_STOPPING,
@@ -217,5 +220,43 @@ describe("mapSubgroupErrors", () => {
     expect(mapped.rows[0]?.id).toBeDefined();
     expect(mapped.general).toHaveLength(1);
     expect(mapped.general[0].code).toBe("subgroup_duplicate_id");
+  });
+});
+
+describe("buildClusterDefinition", () => {
+  it("builds a cluster_post definition from the form", () => {
+    const definition = buildClusterDefinition(DEFAULT_CLUSTER_FORM);
+    expect(definition["mode"]).toBe("cluster_post");
+    expect(definition["icc"]).toBe(0.01);
+    expect(definition["clusters"]).toEqual({
+      control_clusters: 4,
+      intervention_clusters: 4,
+      mean_cluster_size: 100,
+      cluster_size_distribution: { type: "fixed" },
+    });
+  });
+
+  it("includes sd only for variable size distributions", () => {
+    const definition = buildClusterDefinition({
+      ...DEFAULT_CLUSTER_FORM,
+      sizeType: "lognormal",
+      sizeSd: 25,
+    });
+    const clusters = definition["clusters"] as Record<string, unknown>;
+    expect(clusters["cluster_size_distribution"]).toEqual({ type: "lognormal", sd: 25 });
+  });
+});
+
+describe("mapClusterErrors", () => {
+  it("routes cluster paths to fields and the rest to the banner", () => {
+    const mapped = mapClusterErrors([
+      error("icc", "icc_out_of_bounds"),
+      error("clusters.cluster_size_distribution.sd", "cluster_size_sd_required"),
+      error("mode", "invalid_mode"),
+    ]);
+    expect(mapped.fields.icc).toBeDefined();
+    expect(mapped.fields.sizeSd).toBeDefined();
+    expect(mapped.general).toHaveLength(1);
+    expect(mapped.general[0].code).toBe("invalid_mode");
   });
 });

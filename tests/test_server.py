@@ -279,6 +279,81 @@ def test_subgroups_family_errors(client: TestClient) -> None:
     assert any(e["code"] == "subgroup_seed_mismatch" for e in response.json()["errors"])
 
 
+def cluster_payload(**overrides: Any) -> dict[str, Any]:
+    raw: dict[str, Any] = {
+        "schema_version": "icebergsim.trial.v2",
+        "id": "cluster_ui",
+        "label": "Cluster trial",
+        "mode": "cluster_post",
+        "n_simulations": 2000,
+        "random_seed": 303,
+        "alpha": 0.05,
+        "arms": {
+            "control": {"event_probability": 0.20},
+            "intervention": {"event_probability": 0.10},
+        },
+        "clusters": {
+            "control_clusters": 4,
+            "intervention_clusters": 4,
+            "mean_cluster_size": 100,
+            "cluster_size_distribution": {"type": "fixed"},
+        },
+        "icc": 0.01,
+    }
+    raw.update(overrides)
+    return raw
+
+
+def test_cluster_sample_size_contract(client: TestClient) -> None:
+    response = client.post(
+        "/api/sample-size/cluster",
+        json={
+            "p_control": 0.20,
+            "p_intervention": 0.10,
+            "alpha": 0.05,
+            "power": 0.80,
+            "mean_cluster_size": 100,
+            "icc": 0.01,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert abs(body["design_effect"] - 1.99) < 1e-12
+    assert abs(body["cluster_adjusted_n_per_arm_unrounded"] - 390.48176678386704) < 1e-9
+    assert body["clusters_per_arm"] == 4
+    missing = client.post("/api/sample-size/cluster", json={"p_control": 0.2})
+    assert missing.status_code == 422
+
+
+def test_cluster_simulation_contract(client: TestClient) -> None:
+    response = client.post("/api/cluster", json=cluster_payload())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["design"]["control_clusters"] == 4
+    assert body["design"]["icc"] == 0.01
+    summary = body["summary"]
+    assert abs(summary["mean_design_effect"] - 1.99) < 1e-9  # fixed sizes
+    for key in (
+        "power_unadjusted_chi_square",
+        "power_adjusted_chi_square",
+        "power_cluster_level_difference",
+    ):
+        assert 0.0 <= summary[key] <= 1.0
+    assert summary["power_unadjusted_chi_square"] >= summary["power_adjusted_chi_square"]
+    assert any("anti-conservative" in note for note in body["notes"])
+    assert body["manifest"]["rng_algorithm"] == "PCG64"
+    assert "NaN" not in response.text
+
+
+def test_cluster_simulation_rejects_bad_definitions(client: TestClient) -> None:
+    bad_icc = client.post("/api/cluster", json=cluster_payload(icc=1.0))
+    assert bad_icc.status_code == 422
+    assert any(e["code"] == "icc_out_of_bounds" for e in bad_icc.json()["errors"])
+    wrong_mode = client.post("/api/cluster", json=cluster_payload(mode="individual_binary"))
+    assert wrong_mode.status_code == 422
+    assert any(e["code"] == "invalid_mode" for e in wrong_mode.json()["errors"])
+
+
 def test_simulate_response_is_strict_json(client: TestClient) -> None:
     """NaN must never leak into the wire format (undefined -> null)."""
     lossy: dict[str, Any] = make_raw(

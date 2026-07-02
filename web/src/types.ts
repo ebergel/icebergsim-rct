@@ -192,3 +192,41 @@ export interface SubgroupsResponse {
   warnings: string[];
   notes: string[];
 }
+
+export interface ClusterSampleSizeResponse {
+  individual_n_per_arm_unrounded: number;
+  design_effect: number;
+  cluster_adjusted_n_per_arm_unrounded: number;
+  n_per_arm_cluster_adjusted: number;
+  clusters_per_arm: number;
+  formula: string;
+}
+
+export interface ClusterSummaryT {
+  mean_cer: number | null;
+  mean_eer: number | null;
+  mean_design_effect: number;
+  mean_cluster_level_difference: number | null;
+  power_unadjusted_chi_square: number;
+  power_adjusted_chi_square: number;
+  power_cluster_level_difference: number;
+}
+
+export interface ClusterResponse {
+  manifest: {
+    input_hash: string;
+    random_seed: number | null;
+    n_simulations: number;
+    rng_algorithm: string;
+    spec_version: string;
+  };
+  design: {
+    control_clusters: number;
+    intervention_clusters: number;
+    mean_cluster_size: number;
+    icc: number;
+    size_distribution: { type: string; sd: number | null; min: number; max: number | null };
+  };
+  summary: ClusterSummaryT;
+  notes: string[];
+}
