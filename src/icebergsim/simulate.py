@@ -22,9 +22,9 @@ from icebergsim.model import (
     SimulationSummary,
     TrialDefinition,
     ValidatedTrial,
+    derive_loss_probabilities,
 )
 from icebergsim.rng import RNG_ALGORITHM, create_rng
-from icebergsim.validate import derive_loss_probabilities
 
 IntArray = npt.NDArray[np.int64]
 
@@ -163,7 +163,7 @@ def _simulate_imperfect_tables(
     p_control = definition.control.event_probability
     p_intervention = definition.intervention.event_probability
     p_untreated = definition.untreated_event_probability
-    control_events, control_observed = _simulate_imperfect_arm(
+    control_events, control_observed = simulate_arm_counts(
         n=validated.n_control,
         imperfections=definition.control_imperfections,
         p_assigned=p_control,
@@ -173,7 +173,7 @@ def _simulate_imperfect_tables(
         n_sims=n_sims,
         rng=rng,
     )
-    intervention_events, intervention_observed = _simulate_imperfect_arm(
+    intervention_events, intervention_observed = simulate_arm_counts(
         n=validated.n_intervention,
         imperfections=definition.intervention_imperfections,
         p_assigned=p_intervention,
@@ -191,7 +191,7 @@ def _simulate_imperfect_tables(
     )
 
 
-def _simulate_imperfect_arm(
+def simulate_arm_counts(
     *,
     n: int,
     imperfections: ImperfectionDefinition,

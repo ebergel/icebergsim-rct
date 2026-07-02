@@ -9,7 +9,6 @@ stage are returned together, without noise from downstream checks that assume va
 from __future__ import annotations
 
 import dataclasses
-import math
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -18,16 +17,21 @@ from icebergsim.model import (
     AnalysisOptions,
     AnalysisPopulation,
     ArmDefinition,
-    DerivedLossProbabilities,
     ImperfectionDefinition,
     PValueMethod,
+    StoppingPlan,
     TrialDefinition,
     ValidatedTrial,
     ValidationError,
+    derive_loss_probabilities,
+    round_half_up,
 )
 from icebergsim.model import (
     validation_error as _error,
 )
+from icebergsim.stopping import make_stopping_plan
+
+__all__ = ["derive_loss_probabilities", "validate_trial_definition"]
 
 Errors = tuple[ValidationError, ...]
 
@@ -57,57 +61,6 @@ _IMPERFECTION_PROBABILITY_FIELDS = (
     "ascertainment_event_probability",
     "ascertainment_nonevent_false_positive_probability",
 )
-
-
-def derive_loss_probabilities(
-    p_exposure: float,
-    loss_probability: float,
-    lost_event_risk_ratio: float,
-    *,
-    path: str = "lost_event_risk_ratio",
-    details: Mapping[str, Any] | None = None,
-) -> DerivedLossProbabilities | Errors:
-    """Event probabilities for lost and non-lost participants (SPEC §5.3, AXIOMS §8).
-
-    The formulas preserve the marginal event probability across lost and non-lost
-    participants: ``L * p_lost + (1 - L) * p_nonlost == p_exposure``. If a derived
-    probability falls outside [0, 1], the scenario is mathematically inconsistent and is
-    rejected — never silently clipped (AXIOMS §4).
-    """
-    context = dict(details or {})
-    p_lost = p_exposure * lost_event_risk_ratio
-    if not 0.0 <= p_lost <= 1.0:
-        return (
-            _error(
-                code="derived_probability_out_of_bounds",
-                message=f"Derived p_lost = {p_lost:.6g} is outside [0, 1].",
-                path=path,
-                details={**context, "derived_value": p_lost},
-            ),
-        )
-    if loss_probability >= 1.0:
-        return (
-            _error(
-                code="loss_probability_not_less_than_one",
-                message="loss_probability must be < 1 for p_nonlost to be defined.",
-                path=path,
-                details=context,
-            ),
-        )
-    if loss_probability == 0.0:
-        p_nonlost = p_exposure
-    else:
-        p_nonlost = (p_exposure - loss_probability * p_lost) / (1.0 - loss_probability)
-    if not 0.0 <= p_nonlost <= 1.0:
-        return (
-            _error(
-                code="derived_probability_out_of_bounds",
-                message=f"Derived p_nonlost = {p_nonlost:.6g} is outside [0, 1].",
-                path=path,
-                details={**context, "derived_value": p_nonlost},
-            ),
-        )
-    return DerivedLossProbabilities(p_lost=p_lost, p_nonlost=p_nonlost)
 
 
 def validate_trial_definition(raw: Mapping[str, Any]) -> ValidatedTrial | Errors:
@@ -182,7 +135,70 @@ def _parse_definition(
             raw_imperfections.get("intervention"), "intervention", errors
         ),
         analysis=_parse_analysis_options(raw.get("analysis"), errors),
+        stopping=_parse_stopping(raw.get("stopping"), errors),
     )
+
+
+def _parse_stopping(raw_stopping: Any, errors: list[ValidationError]) -> StoppingPlan | None:
+    """Parse a SPEC §11.1 stopping block via make_stopping_plan; disabled -> None."""
+    if raw_stopping is None:
+        return None
+    if not isinstance(raw_stopping, Mapping):
+        errors.append(_error("invalid_type", "stopping must be a mapping.", "stopping"))
+        return None
+    if not _read_bool(raw_stopping, "enabled", default=True, path="stopping.enabled",
+                      errors=errors):
+        return None
+    rule = raw_stopping.get("rule")
+    n_interims = _read_int(raw_stopping, "n_interims", None, "stopping.n_interims", errors)
+    if not isinstance(rule, str) or n_interims is None:
+        if not isinstance(rule, str):
+            errors.append(_error("missing_field", "stopping.rule is required.", "stopping.rule"))
+        return None
+    result = make_stopping_plan(
+        rule,
+        n_interims,
+        information_fractions=_read_number_tuple(
+            raw_stopping, "information_fractions", "stopping.information_fractions", errors
+        ),
+        interim_p_thresholds=_read_number_tuple(
+            raw_stopping, "interim_p_thresholds", "stopping.interim_p_thresholds", errors
+        ),
+        final_p_threshold=raw_stopping.get("final_p_threshold"),
+        stop_for=raw_stopping.get("stop_for", "benefit_or_harm"),
+        minimum_total_events=_read_int(
+            raw_stopping,
+            "minimum_total_events",
+            None,
+            "stopping.minimum_total_events",
+            errors,
+            optional=True,
+        ),
+    )
+    if isinstance(result, tuple):
+        errors.extend(result)
+        return None
+    return result
+
+
+def _read_number_tuple(
+    raw: Mapping[str, Any], key: str, path: str, errors: list[ValidationError]
+) -> tuple[float, ...] | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, list | tuple):
+        errors.append(_error("invalid_type", f"{path} must be a list of numbers.", path))
+        return None
+    numbers: list[float] = []
+    for i, item in enumerate(value):
+        if not _is_number(item):
+            errors.append(
+                _error("invalid_type", f"{path}[{i}] must be a number, got {item!r}.", path)
+            )
+            return None
+        numbers.append(float(item))
+    return tuple(numbers)
 
 
 def _parse_arm(raw_arms: Any, arm: str, errors: list[ValidationError]) -> ArmDefinition:
@@ -405,7 +421,7 @@ def _resolve_sample_sizes(
         return None
     elif definition.allocation.total_n is not None:
         total_n = definition.allocation.total_n
-        n_intervention = _round_half_up(total_n * definition.allocation.intervention_fraction)
+        n_intervention = round_half_up(total_n * definition.allocation.intervention_fraction)
         resolved = (total_n - n_intervention, n_intervention)
     else:
         errors.append(
@@ -455,10 +471,6 @@ def _check_derived_probabilities(
 
 
 # --- helpers --------------------------------------------------------------------------------
-
-
-def _round_half_up(value: float) -> int:
-    return math.floor(value + 0.5)
 
 
 def _is_number(value: object) -> bool:

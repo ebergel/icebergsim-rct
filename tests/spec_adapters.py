@@ -22,6 +22,7 @@ from icebergsim.sample_size import (
     calculate_two_arm_sample_size,
 )
 from icebergsim.simulate import SimulationResult, simulate_trial
+from icebergsim.stopping import make_stopping_plan
 from icebergsim.validate import derive_loss_probabilities, validate_trial_definition
 from spec_harness import Adapter
 
@@ -163,7 +164,27 @@ def _adapt_simulate_individual_trial(case_input: Mapping[str, Any]) -> Mapping[s
     }
 
 
+def _adapt_make_stopping_plan(case_input: Mapping[str, Any]) -> Mapping[str, Any]:
+    interims = case_input.get("interim_p_thresholds")
+    fractions = case_input.get("information_fractions")
+    result = make_stopping_plan(
+        rule=case_input["rule"],
+        n_interims=case_input["n_interims"],
+        information_fractions=tuple(fractions) if fractions is not None else None,
+        interim_p_thresholds=tuple(interims) if interims is not None else None,
+        final_p_threshold=case_input.get("final_p_threshold"),
+    )
+    if isinstance(result, tuple):
+        return _error_payload(result)
+    return {
+        "interim_p_thresholds": list(result.interim_p_thresholds),
+        "final_p_threshold": result.final_p_threshold,
+        "information_fractions": list(result.information_fractions),
+    }
+
+
 ADAPTERS: dict[tuple[str, str], Adapter] = {
+    ("stopping", "make_stopping_plan"): _adapt_make_stopping_plan,
     ("derived_probabilities", "loss_adjustment"): _adapt_loss_adjustment,
     ("individual_simulation", "validate_trial_definition"): _adapt_validate_trial_definition,
     ("individual_simulation", "simulate_individual_trial"): _adapt_simulate_individual_trial,

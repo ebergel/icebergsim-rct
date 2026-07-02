@@ -6,6 +6,7 @@ in pure functions in the engine modules. Collections inside domain objects are t
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -128,6 +129,76 @@ class DerivedLossProbabilities:
 
     p_lost: float
     p_nonlost: float
+
+
+def derive_loss_probabilities(
+    p_exposure: float,
+    loss_probability: float,
+    lost_event_risk_ratio: float,
+    *,
+    path: str = "lost_event_risk_ratio",
+    details: Mapping[str, Any] | None = None,
+) -> DerivedLossProbabilities | tuple[ValidationError, ...]:
+    """Event probabilities for lost and non-lost participants (SPEC §5.3, AXIOMS §8).
+
+    The formulas preserve the marginal event probability across lost and non-lost
+    participants: ``L * p_lost + (1 - L) * p_nonlost == p_exposure``. If a derived
+    probability falls outside [0, 1], the scenario is mathematically inconsistent and is
+    rejected — never silently clipped (AXIOMS §4).
+    """
+    context = dict(details or {})
+    p_lost = p_exposure * lost_event_risk_ratio
+    if not 0.0 <= p_lost <= 1.0:
+        return (
+            validation_error(
+                code="derived_probability_out_of_bounds",
+                message=f"Derived p_lost = {p_lost:.6g} is outside [0, 1].",
+                path=path,
+                details={**context, "derived_value": p_lost},
+            ),
+        )
+    if loss_probability >= 1.0:
+        return (
+            validation_error(
+                code="loss_probability_not_less_than_one",
+                message="loss_probability must be < 1 for p_nonlost to be defined.",
+                path=path,
+                details=context,
+            ),
+        )
+    if loss_probability == 0.0:
+        p_nonlost = p_exposure
+    else:
+        p_nonlost = (p_exposure - loss_probability * p_lost) / (1.0 - loss_probability)
+    if not 0.0 <= p_nonlost <= 1.0:
+        return (
+            validation_error(
+                code="derived_probability_out_of_bounds",
+                message=f"Derived p_nonlost = {p_nonlost:.6g} is outside [0, 1].",
+                path=path,
+                details={**context, "derived_value": p_nonlost},
+            ),
+        )
+    return DerivedLossProbabilities(p_lost=p_lost, p_nonlost=p_nonlost)
+
+
+def round_half_up(value: float) -> int:
+    """Conventional rounding used for sample splits (SPEC §4.1, §11.3)."""
+    return math.floor(value + 0.5)
+
+
+@dataclass(frozen=True, slots=True)
+class StoppingSummary:
+    """Operating characteristics of a stopping simulation (SPEC §11.4)."""
+
+    proportion_stopped_any: float
+    proportion_stopped_benefit: float
+    proportion_stopped_harm: float
+    proportion_stopped_by_look: tuple[float, ...]
+    mean_fraction_at_stop: float | None
+    final_power_including_stops: float
+    type_i_error_including_stops: float | None = None
+    type_i_error_mcse: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
