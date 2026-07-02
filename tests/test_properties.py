@@ -12,7 +12,9 @@ import numpy as np
 import pytest
 
 from icebergsim.simulate import simulate_trial
+from icebergsim.subgroups import simulate_risk_subgroups
 from spec_harness import load_property_test_names
+from test_subgroups import validated_family
 from trial_builders import make_validated
 
 STOCHASTIC_POWER_TOLERANCE = 0.03  # spec/tests.yaml metadata.tolerance_defaults
@@ -62,10 +64,24 @@ def check_null_type_i_error_near_alpha() -> None:
     assert abs(result.summary.type_i_error - 0.05) <= STOCHASTIC_POWER_TOLERANCE
 
 
+def check_subgroup_aggregate_is_sum_of_counts() -> None:
+    """Aggregated subgroup analyses are based on summed 2x2 counts per replicate."""
+    result = simulate_risk_subgroups(validated_family())
+    for field in (
+        "control_events",
+        "control_observed",
+        "intervention_events",
+        "intervention_observed",
+    ):
+        summed = np.sum([getattr(s.result.tables, field) for s in result.subgroups], axis=0)
+        assert np.array_equal(getattr(result.aggregate_tables, field), summed)
+
+
 IMPLEMENTED: dict[str, Callable[[], None]] = {
     "probabilities_are_bounded": check_probabilities_are_bounded,
     "monotonic_power_with_sample_size": check_monotonic_power_with_sample_size,
     "null_type_i_error_near_alpha": check_null_type_i_error_near_alpha,
+    "subgroup_aggregate_is_sum_of_counts": check_subgroup_aggregate_is_sum_of_counts,
 }
 
 

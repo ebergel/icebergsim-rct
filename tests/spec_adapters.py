@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from icebergsim.analysis import analyze_2x2
+from icebergsim.analysis import analyze_2x2 as _analyze
 from icebergsim.model import Table2x2, ValidationError
 from icebergsim.sample_size import (
     calculate_cluster_post_sample_size,
@@ -23,6 +24,7 @@ from icebergsim.sample_size import (
 )
 from icebergsim.simulate import SimulationResult, simulate_trial
 from icebergsim.stopping import make_stopping_plan
+from icebergsim.subgroups import aggregate_subgroup_tables
 from icebergsim.validate import derive_loss_probabilities, validate_trial_definition
 from spec_harness import Adapter
 
@@ -183,8 +185,33 @@ def _adapt_make_stopping_plan(case_input: Mapping[str, Any]) -> Mapping[str, Any
     }
 
 
+def _adapt_aggregate_subgroup_tables(case_input: Mapping[str, Any]) -> Mapping[str, Any]:
+    aggregate = aggregate_subgroup_tables(
+        [
+            Table2x2(
+                control_events=t["control_events"],
+                control_observed=t["control_observed"],
+                intervention_events=t["intervention_events"],
+                intervention_observed=t["intervention_observed"],
+            )
+            for t in case_input["subgroup_tables"]
+        ]
+    )
+    analysis = _analyze(aggregate)
+    return {
+        "control_events": aggregate.control_events,
+        "control_observed": aggregate.control_observed,
+        "intervention_events": aggregate.intervention_events,
+        "intervention_observed": aggregate.intervention_observed,
+        "aggregate_cer": analysis.cer,
+        "aggregate_eer": analysis.eer,
+        "aggregate_arr": analysis.arr,
+    }
+
+
 ADAPTERS: dict[tuple[str, str], Adapter] = {
     ("stopping", "make_stopping_plan"): _adapt_make_stopping_plan,
+    ("risk_subgroups", "aggregate_subgroup_tables"): _adapt_aggregate_subgroup_tables,
     ("derived_probabilities", "loss_adjustment"): _adapt_loss_adjustment,
     ("individual_simulation", "validate_trial_definition"): _adapt_validate_trial_definition,
     ("individual_simulation", "simulate_individual_trial"): _adapt_simulate_individual_trial,
