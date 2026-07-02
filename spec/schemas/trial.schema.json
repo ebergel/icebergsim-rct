@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://icebergsim.org/schemas/trial.v2.schema.json",
+  "title": "ICEBERGSIM v2 TrialDefinition",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "mode",
+    "n_simulations",
+    "arms",
+    "allocation",
+    "untreated_event_probability"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "icebergsim.trial.v2"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "label": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "individual_binary",
+        "cluster_post",
+        "cluster_pre_post"
+      ]
+    },
+    "n_simulations": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "random_seed": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "alpha": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1,
+      "default": 0.05
+    },
+    "alternative": {
+      "enum": [
+        "two_sided",
+        "superiority_one_sided",
+        "noninferiority_one_sided"
+      ],
+      "default": "two_sided"
+    },
+    "zero_cell_correction": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "default": 0.5
+    },
+    "arms": {
+      "type": "object",
+      "required": [
+        "control",
+        "intervention"
+      ],
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/arm"
+        },
+        "intervention": {
+          "$ref": "#/$defs/arm"
+        }
+      }
+    },
+    "allocation": {
+      "type": "object",
+      "properties": {
+        "total_n": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "intervention_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        }
+      }
+    },
+    "untreated_event_probability": {
+      "$ref": "#/$defs/probability"
+    },
+    "imperfections": {
+      "type": "object",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/imperfections"
+        },
+        "intervention": {
+          "$ref": "#/$defs/imperfections"
+        }
+      }
+    },
+    "analysis": {
+      "type": "object"
+    },
+    "stopping": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "$defs": {
+    "probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "arm": {
+      "type": "object",
+      "required": [
+        "event_probability"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "n": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "event_probability": {
+          "$ref": "#/$defs/probability"
+        }
+      }
+    },
+    "imperfections": {
+      "type": "object",
+      "properties": {
+        "loss_probability": {
+          "$ref": "#/$defs/probability",
+          "default": 0
+        },
+        "lost_event_risk_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1
+        },
+        "noncompliance_probability": {
+          "$ref": "#/$defs/probability",
+          "default": 0
+        },
+        "crossover_probability": {
+          "$ref": "#/$defs/probability",
+          "default": 0
+        },
+        "ascertainment_event_probability": {
+          "$ref": "#/$defs/probability",
+          "default": 1
+        },
+        "ascertainment_nonevent_false_positive_probability": {
+          "$ref": "#/$defs/probability",
+          "default": 0
+        }
+      }
+    }
+  }
+}

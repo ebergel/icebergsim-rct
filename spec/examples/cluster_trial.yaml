@@ -1,0 +1,25 @@
+schema_version: "icebergsim.trial.v2"
+id: "cluster_post_example"
+label: "Post-only cluster randomized trial"
+mode: "cluster_post"
+n_simulations: 5000
+random_seed: 303
+alpha: 0.05
+arms:
+  control:
+    label: "Control clusters"
+    event_probability: 0.20
+  intervention:
+    label: "Intervention clusters"
+    event_probability: 0.10
+allocation:
+  total_n: null
+  intervention_fraction: 0.5
+untreated_event_probability: 0.30
+clusters:
+  control_clusters: 4
+  intervention_clusters: 4
+  mean_cluster_size: 100
+  cluster_size_distribution:
+    type: "fixed"
+icc: 0.01

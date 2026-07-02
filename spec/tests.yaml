@@ -1,0 +1,334 @@
+# tests.yaml — ICEBERGSIM v2 language-agnostic tests
+
+metadata:
+  spec_version: "2.0.0-alpha.1"
+  tolerance_defaults:
+    absolute: 1.0e-9
+    stochastic_mean_event_rate: 0.01
+    stochastic_power: 0.03
+
+modules:
+  sample_size:
+    calculate_two_arm_sample_size:
+      - name: "two_sided_equal_allocation_20_vs_10_percent"
+        description: "Normal-approximation sample size for two independent proportions."
+        input:
+          p_control: 0.20
+          p_intervention: 0.10
+          alpha: 0.05
+          power: 0.80
+          alternative: "two_sided"
+          allocation_ratio_intervention_to_control: 1.0
+        output:
+          n_control: 197
+          n_intervention: 197
+          n_total: 394
+          unrounded_n_per_arm: 196.22199335872716
+        tolerance:
+          unrounded_n_per_arm: 1.0e-9
+
+      - name: "one_sided_equal_allocation_20_vs_10_percent"
+        input:
+          p_control: 0.20
+          p_intervention: 0.10
+          alpha: 0.05
+          power: 0.80
+          alternative: "superiority_one_sided"
+          allocation_ratio_intervention_to_control: 1.0
+        output_constraints:
+          n_control_less_than: 197
+          n_intervention_less_than: 197
+          n_control_greater_than: 150
+
+  derived_probabilities:
+    loss_adjustment:
+      - name: "nonlost_probability_preserves_marginal_risk"
+        input:
+          p_exposure: 0.20
+          loss_probability: 0.25
+          lost_event_risk_ratio: 2.0
+        output:
+          p_lost: 0.40
+          p_nonlost: 0.13333333333333333
+        tolerance:
+          p_nonlost: 1.0e-12
+
+      - name: "invalid_lost_probability_rejected"
+        input:
+          p_exposure: 0.80
+          loss_probability: 0.50
+          lost_event_risk_ratio: 2.0
+        error:
+          type: "ValidationError"
+          code: "derived_probability_out_of_bounds"
+          message_contains: "p_lost"
+
+  analysis:
+    analyze_2x2:
+      - name: "basic_effect_measures"
+        input:
+          control_events: 40
+          control_observed: 200
+          intervention_events: 20
+          intervention_observed: 200
+          alpha: 0.05
+        output:
+          cer: 0.20
+          eer: 0.10
+          arr: 0.10
+          rr: 0.50
+          rrr: 0.50
+          nnt: 10.0
+        tolerance:
+          arr: 1.0e-12
+          rr: 1.0e-12
+
+      - name: "harm_measures"
+        input:
+          control_events: 20
+          control_observed: 200
+          intervention_events: 40
+          intervention_observed: 200
+          alpha: 0.05
+        output:
+          cer: 0.10
+          eer: 0.20
+          arr: -0.10
+          rr: 2.0
+          rrr: -1.0
+          nnt: null
+          nnh: 10.0
+
+      - name: "zero_control_event_rr_null_without_correction"
+        input:
+          control_events: 0
+          control_observed: 100
+          intervention_events: 5
+          intervention_observed: 100
+          zero_cell_correction: null
+        output:
+          rr: null
+          rrr: null
+        warnings_contains:
+          - "zero_event_cell"
+
+  individual_simulation:
+    validate_trial_definition:
+      - name: "valid_minimal_two_arm_trial"
+        input:
+          schema_version: "icebergsim.trial.v2"
+          id: "simple"
+          label: "Simple two-arm trial"
+          mode: "individual_binary"
+          n_simulations: 1000
+          random_seed: 12345
+          alpha: 0.05
+          arms:
+            control:
+              label: "Control"
+              event_probability: 0.20
+            intervention:
+              label: "Intervention"
+              event_probability: 0.10
+          allocation:
+            total_n: 400
+            intervention_fraction: 0.5
+          untreated_event_probability: 0.30
+        output:
+          valid: true
+          n_control: 200
+          n_intervention: 200
+
+      - name: "reject_probability_out_of_range"
+        input:
+          schema_version: "icebergsim.trial.v2"
+          id: "bad"
+          mode: "individual_binary"
+          n_simulations: 100
+          arms:
+            control: {event_probability: 1.2}
+            intervention: {event_probability: 0.1}
+          allocation: {total_n: 100, intervention_fraction: 0.5}
+          untreated_event_probability: 0.3
+        error:
+          type: "ValidationError"
+          code: "probability_out_of_bounds"
+
+    simulate_individual_trial:
+      - name: "ideal_simulation_means_close_to_input"
+        description: "With 20000 simulations, empirical mean event rates should be close to input probabilities."
+        input:
+          schema_version: "icebergsim.trial.v2"
+          id: "ideal_20_vs_10"
+          mode: "individual_binary"
+          n_simulations: 20000
+          random_seed: 20260528
+          alpha: 0.05
+          arms:
+            control: {label: "Control", event_probability: 0.20}
+            intervention: {label: "Intervention", event_probability: 0.10}
+          allocation: {total_n: 400, intervention_fraction: 0.5}
+          untreated_event_probability: 0.30
+          imperfections:
+            control: {}
+            intervention: {}
+        output_constraints:
+          mean_cer_between: [0.19, 0.21]
+          mean_eer_between: [0.09, 0.11]
+          power_between: [0.75, 0.90]
+
+      - name: "seed_reproducibility"
+        input:
+          run_a:
+            schema_version: "icebergsim.trial.v2"
+            id: "seeded"
+            mode: "individual_binary"
+            n_simulations: 1000
+            random_seed: 777
+            arms:
+              control: {event_probability: 0.20}
+              intervention: {event_probability: 0.10}
+            allocation: {total_n: 200, intervention_fraction: 0.5}
+            untreated_event_probability: 0.30
+          run_b_same_as_run_a: true
+        output:
+          arrays_identical: true
+
+      - name: "trial_problems_decrease_observed_power"
+        input:
+          ideal:
+            schema_version: "icebergsim.trial.v2"
+            id: "ideal"
+            mode: "individual_binary"
+            n_simulations: 10000
+            random_seed: 4242
+            arms:
+              control: {event_probability: 0.20}
+              intervention: {event_probability: 0.10}
+            allocation: {total_n: 400, intervention_fraction: 0.5}
+            untreated_event_probability: 0.30
+          pragmatic:
+            schema_version: "icebergsim.trial.v2"
+            id: "pragmatic"
+            mode: "individual_binary"
+            n_simulations: 10000
+            random_seed: 4242
+            arms:
+              control: {event_probability: 0.20}
+              intervention: {event_probability: 0.10}
+            allocation: {total_n: 400, intervention_fraction: 0.5}
+            untreated_event_probability: 0.30
+            imperfections:
+              control:
+                loss_probability: 0.10
+                noncompliance_probability: 0.05
+                crossover_probability: 0.02
+              intervention:
+                loss_probability: 0.10
+                noncompliance_probability: 0.20
+                crossover_probability: 0.02
+        output_constraints:
+          pragmatic_power_less_than_ideal_power: true
+
+  stopping:
+    make_stopping_plan:
+      - name: "peto_three_interims"
+        input:
+          rule: "peto"
+          n_interims: 3
+        output:
+          interim_p_thresholds: [0.001, 0.001, 0.001]
+          final_p_threshold: 0.05
+          information_fractions: [0.25, 0.5, 0.75]
+
+      - name: "pocock_five_interims"
+        input:
+          rule: "pocock"
+          n_interims: 5
+        output:
+          interim_p_thresholds: [0.012, 0.012, 0.012, 0.012, 0.012]
+          final_p_threshold: 0.012
+
+      - name: "obrien_four_interims"
+        input:
+          rule: "obrien_fleming"
+          n_interims: 4
+        output:
+          interim_p_thresholds: [0.0001, 0.0013, 0.008, 0.023]
+          final_p_threshold: 0.041
+
+      - name: "custom_threshold_length_mismatch_rejected"
+        input:
+          rule: "custom"
+          n_interims: 3
+          interim_p_thresholds: [0.001, 0.01]
+          final_p_threshold: 0.05
+        error:
+          type: "ValidationError"
+          code: "stopping_threshold_length_mismatch"
+
+  risk_subgroups:
+    aggregate_subgroup_tables:
+      - name: "aggregate_counts_not_average_effects"
+        input:
+          subgroup_tables:
+            - control_events: 30
+              control_observed: 100
+              intervention_events: 10
+              intervention_observed: 100
+            - control_events: 10
+              control_observed: 100
+              intervention_events: 10
+              intervention_observed: 100
+        output:
+          control_events: 40
+          control_observed: 200
+          intervention_events: 20
+          intervention_observed: 200
+          aggregate_cer: 0.20
+          aggregate_eer: 0.10
+          aggregate_arr: 0.10
+
+  cluster:
+    beta_parameters:
+      - name: "beta_binomial_params_for_icc"
+        input:
+          p: 0.20
+          icc: 0.01
+        output:
+          alpha: 19.8
+          beta: 79.2
+        tolerance:
+          alpha: 1.0e-12
+          beta: 1.0e-12
+
+    sample_size_cluster_post:
+      - name: "cluster_design_effect"
+        input:
+          p_control: 0.20
+          p_intervention: 0.10
+          alpha: 0.05
+          power: 0.80
+          alternative: "two_sided"
+          mean_cluster_size: 100
+          icc: 0.01
+        output:
+          individual_n_per_arm_unrounded: 196.22199335872716
+          design_effect: 1.99
+          cluster_adjusted_n_per_arm_unrounded: 390.48176678386704
+          clusters_per_arm: 4
+        tolerance:
+          design_effect: 1.0e-12
+          cluster_adjusted_n_per_arm_unrounded: 1.0e-9
+
+property_tests:
+  - name: "probabilities_are_bounded"
+    description: "All reported probabilities are in [0,1] or null with a warning."
+  - name: "monotonic_power_with_sample_size"
+    description: "For fixed event probabilities and no stopping, expected power must be nondecreasing as total_n increases, allowing Monte Carlo tolerance."
+  - name: "null_type_i_error_near_alpha"
+    description: "For ideal trials under p_control=p_intervention, estimated Type I error should be within Monte Carlo tolerance of alpha."
+  - name: "subgroup_aggregate_is_sum_of_counts"
+    description: "Aggregated subgroup analyses must be based on summed 2x2 counts, not averaged effect measures."
+  - name: "implementation_directory_deletable"
+    description: "After deleting implementations/, a regenerated implementation from spec + tests must pass this file."

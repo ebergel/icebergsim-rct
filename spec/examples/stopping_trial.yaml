@@ -1,0 +1,25 @@
+schema_version: "icebergsim.trial.v2"
+id: "stopping_peto_example"
+label: "Two-arm trial with Peto-like interim stopping"
+mode: "individual_binary"
+n_simulations: 5000
+random_seed: 404
+alpha: 0.05
+arms:
+  control:
+    label: "Control"
+    event_probability: 0.20
+  intervention:
+    label: "Intervention"
+    event_probability: 0.10
+allocation:
+  total_n: 800
+  intervention_fraction: 0.5
+untreated_event_probability: 0.30
+stopping:
+  enabled: true
+  rule: "peto"
+  n_interims: 3
+  information_fractions: [0.25, 0.5, 0.75]
+  stop_for: "benefit_or_harm"
+  minimum_total_events: null

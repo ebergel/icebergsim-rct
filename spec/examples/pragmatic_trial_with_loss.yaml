@@ -1,0 +1,29 @@
+schema_version: "icebergsim.trial.v2"
+id: "pragmatic_with_loss_noncompliance"
+label: "Pragmatic RCT with loss, noncompliance, and crossover"
+mode: "individual_binary"
+n_simulations: 5000
+random_seed: 202
+alpha: 0.05
+arms:
+  control:
+    label: "Control"
+    event_probability: 0.20
+  intervention:
+    label: "Intervention"
+    event_probability: 0.10
+allocation:
+  total_n: 400
+  intervention_fraction: 0.5
+untreated_event_probability: 0.30
+imperfections:
+  control:
+    loss_probability: 0.10
+    lost_event_risk_ratio: 1.5
+    noncompliance_probability: 0.05
+    crossover_probability: 0.02
+  intervention:
+    loss_probability: 0.15
+    lost_event_risk_ratio: 1.5
+    noncompliance_probability: 0.20
+    crossover_probability: 0.02
