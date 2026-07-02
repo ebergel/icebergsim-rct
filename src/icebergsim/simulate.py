@@ -55,6 +55,7 @@ class SimulationResult:
     rng_algorithm: str
     spec_version: str
     p_value_method: str
+    alpha: float
     tables: SimulatedTables
     arrays: AnalysisBatch
     summary: SimulationSummary
@@ -116,6 +117,7 @@ def simulate_trial(
         rng_algorithm=RNG_ALGORITHM,
         spec_version=SPEC_VERSION,
         p_value_method=definition.analysis.p_value_method,
+        alpha=definition.alpha,
         tables=tables,
         arrays=batch,
         summary=summary,

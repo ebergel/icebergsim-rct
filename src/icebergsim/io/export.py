@@ -36,6 +36,7 @@ def result_to_dict(result: SimulationResult, *, include_arrays: bool = True) -> 
             "rng_algorithm": result.rng_algorithm,
             "spec_version": result.spec_version,
             "p_value_method": result.p_value_method,
+            "alpha": result.alpha,
         },
         "summary": {
             "mean_cer": _number(summary.mean_cer),
