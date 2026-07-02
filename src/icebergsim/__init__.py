@@ -11,6 +11,10 @@ from icebergsim.cluster import (
     simulate_cluster_post_only,
     validate_cluster_trial,
 )
+from icebergsim.cluster_pre_post import (
+    simulate_cluster_pre_post,
+    validate_cluster_pre_post_trial,
+)
 from icebergsim.sample_size import (
     calculate_cluster_post_sample_size,
     calculate_cluster_pre_post_sample_size,
@@ -43,6 +47,7 @@ __all__ = [
     "make_stopping_plan",
     "scenario_summary_table",
     "simulate_cluster_post_only",
+    "simulate_cluster_pre_post",
     "simulate_null",
     "simulate_power_curve",
     "simulate_risk_subgroups",
@@ -50,6 +55,7 @@ __all__ = [
     "simulate_trial",
     "simulate_with_stopping",
     "summarize_batch",
+    "validate_cluster_pre_post_trial",
     "validate_cluster_trial",
     "validate_subgroup_family",
     "validate_trial_definition",

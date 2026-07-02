@@ -424,8 +424,25 @@ def _cluster_level_difference(
     alpha: float,
 ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
     """Pooled two-sample t-test on cluster event proportions (SPEC §14.4)."""
-    control_props = control_events / control_sizes
-    intervention_props = intervention_events / intervention_sizes
+    return cluster_level_t_test(
+        control_events / control_sizes, intervention_events / intervention_sizes, alpha
+    )
+
+
+def cluster_level_t_test(
+    control_values: FloatArray,
+    intervention_values: FloatArray,
+    alpha: float,
+) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+    """Pooled two-sample t-test on per-cluster values, vectorized over replicates.
+
+    Takes (n_sims, k) arrays per arm (e.g. cluster proportions, or pre/post change
+    scores) and returns (difference, ci_low, ci_high, p_values), with difference =
+    mean(control) - mean(intervention) so that a beneficial intervention is positive,
+    matching the ARR sign convention.
+    """
+    control_props = control_values
+    intervention_props = intervention_values
     k_control, k_intervention = control_props.shape[1], intervention_props.shape[1]
     difference = control_props.mean(axis=1) - intervention_props.mean(axis=1)
     df = k_control + k_intervention - 2

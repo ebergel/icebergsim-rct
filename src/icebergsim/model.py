@@ -257,6 +257,44 @@ class ClusterTrialDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class ClusterPrePostTrialDefinition:
+    """A validated pre/post cluster randomized trial (SPEC §2.8, §15).
+
+    Both arms share ``baseline_event_probability`` at the pre period (randomized at
+    baseline); the arm event probabilities apply at follow-up.
+    """
+
+    id: str
+    n_simulations: int
+    control_clusters: int
+    intervention_clusters: int
+    mean_cluster_size: float
+    icc: float
+    pre_post_correlation: float
+    baseline_event_probability: float
+    p_control: float
+    p_intervention: float
+    label: str = ""
+    random_seed: int | None = None
+    alpha: float = 0.05
+    size_distribution: ClusterSizeDistribution = ClusterSizeDistribution()
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterPrePostSummary:
+    """Summary of a pre/post cluster simulation (SPEC §2.8)."""
+
+    mean_baseline_cer: float
+    mean_baseline_eer: float
+    mean_followup_cer: float
+    mean_followup_eer: float
+    mean_did: float
+    power_change_score: float
+    power_followup_only: float
+    truncated_rate_fraction: float
+
+
+@dataclass(frozen=True, slots=True)
 class ClusterSimulationSummary:
     """Summary of a cluster simulation across the three required analyses (SPEC §14.4)."""
 

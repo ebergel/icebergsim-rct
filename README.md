@@ -50,12 +50,13 @@ and all 5 property tests in spec/tests.yaml pass**, all four canonical examples 
 end-to-end, and every result carries a reproducibility manifest (input hash, seed, PCG64,
 spec version, analysis method).
 
-Reserved for v2.1 (explicitly rejected with structured errors, never silent):
-cluster pre/post *simulation* (the §15.1 sample-size formula IS implemented),
+v2.1 additions implemented: cluster pre/post *simulation* (SPEC §2.8/§15 — correlated
+cluster rates matching the §15.1 variance algebra, change-score + follow-up-only analyses).
+
+Still reserved (explicitly rejected with structured errors, never silent):
 `legacy_expected_partition` mode, `monte_carlo_exact` p-values, `legacy_beta_size` cluster
 sizes, non-default analysis populations (`as_treated`, `per_protocol`,
-`intention_to_treat_all_randomized`), parquet export, and visualizations (SPEC §16 —
-plot data can be derived from the exported result arrays).
+`intention_to_treat_all_randomized`), and parquet export.
 
 ## Design rules
 
