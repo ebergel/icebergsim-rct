@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { QuickTrial } from "./pages/QuickTrial";
+import { RiskSubgroups } from "./pages/RiskSubgroups";
 import { SampleSizePower } from "./pages/SampleSizePower";
+import { StoppingRules } from "./pages/StoppingRules";
 import { TrialGoesBadly } from "./pages/TrialGoesBadly";
 
 const PAGES = [
   { key: "quick", label: "Quick Trial", ready: true },
   { key: "imperfections", label: "Trial Goes Badly", ready: true },
   { key: "sample-size", label: "Sample Size & Power", ready: true },
-  { key: "stopping", label: "Stopping Rules", ready: false },
-  { key: "subgroups", label: "Risk Subgroups", ready: false },
+  { key: "stopping", label: "Stopping Rules", ready: true },
+  { key: "subgroups", label: "Risk Subgroups", ready: true },
   { key: "cluster", label: "Cluster Trials", ready: false },
 ] as const;
 
@@ -54,6 +56,8 @@ export function App() {
         {page === "quick" && <QuickTrial />}
         {page === "imperfections" && <TrialGoesBadly />}
         {page === "sample-size" && <SampleSizePower />}
+        {page === "stopping" && <StoppingRules />}
+        {page === "subgroups" && <RiskSubgroups />}
       </main>
       <footer>
         <p className="muted">
