@@ -1,0 +1,123 @@
+"""Immutable domain model (SPEC §4, ARCHITECTURE §3.1).
+
+All objects are frozen dataclasses with spec defaults. They carry data only — behavior lives
+in pure functions in the engine modules. Collections inside domain objects are tuples.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+Mode = Literal["individual_binary", "cluster_post", "cluster_pre_post"]
+Alternative = Literal["two_sided", "superiority_one_sided", "noninferiority_one_sided"]
+PValueMethod = Literal[
+    "likelihood_ratio", "pearson_chi_square", "fisher_exact", "monte_carlo_exact"
+]
+AnalysisPopulation = Literal[
+    "intention_to_treat_observed",
+    "intention_to_treat_all_randomized",
+    "as_treated",
+    "per_protocol",
+]
+StoppingRule = Literal["peto", "pocock", "obrien_fleming", "custom"]
+StopFor = Literal["benefit", "harm", "benefit_or_harm"]
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationError:
+    """Structured validation error (SPEC §18). Returned as data, never raised."""
+
+    code: str
+    message: str
+    path: str
+    type: str = "ValidationError"
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ImperfectionDefinition:
+    """Per-assigned-arm trial imperfections with spec defaults (SPEC §4.2)."""
+
+    loss_probability: float = 0.0
+    lost_event_risk_ratio: float = 1.0
+    noncompliance_probability: float = 0.0
+    crossover_probability: float = 0.0
+    ascertainment_event_probability: float = 1.0
+    ascertainment_nonevent_false_positive_probability: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ArmDefinition:
+    event_probability: float
+    label: str = ""
+    n: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Allocation:
+    total_n: int | None = None
+    intervention_fraction: float = 0.5
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisOptions:
+    p_value_method: PValueMethod = "likelihood_ratio"
+    confidence_interval_method: str = "log_rr_and_wald_arr"
+    include_lost_in_denominator: bool = False
+    analysis_population: AnalysisPopulation = "intention_to_treat_observed"
+
+
+@dataclass(frozen=True, slots=True)
+class StoppingPlan:
+    """Interim stopping plan (SPEC §11.1). Data only; construction/validation in stopping.py."""
+
+    rule: StoppingRule
+    n_interims: int
+    information_fractions: tuple[float, ...]
+    interim_p_thresholds: tuple[float, ...]
+    final_p_threshold: float
+    enabled: bool = True
+    stop_for: StopFor = "benefit_or_harm"
+    minimum_total_events: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TrialDefinition:
+    """A complete individually randomized trial definition (SPEC §4.1)."""
+
+    id: str
+    mode: Mode
+    n_simulations: int
+    control: ArmDefinition
+    intervention: ArmDefinition
+    untreated_event_probability: float
+    schema_version: str = "icebergsim.trial.v2"
+    label: str = ""
+    random_seed: int | None = None
+    alpha: float = 0.05
+    alternative: Alternative = "two_sided"
+    zero_cell_correction: float | None = 0.5
+    allocation: Allocation = Allocation()
+    control_imperfections: ImperfectionDefinition = ImperfectionDefinition()
+    intervention_imperfections: ImperfectionDefinition = ImperfectionDefinition()
+    analysis: AnalysisOptions = AnalysisOptions()
+    stopping: StoppingPlan | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedTrial:
+    """A trial definition that passed validation, with resolved per-arm sample sizes."""
+
+    definition: TrialDefinition
+    n_control: int
+    n_intervention: int
+
+
+@dataclass(frozen=True, slots=True)
+class DerivedLossProbabilities:
+    """Event probabilities for lost / non-lost participants (SPEC §5.3, AXIOMS §8)."""
+
+    p_lost: float
+    p_nonlost: float
