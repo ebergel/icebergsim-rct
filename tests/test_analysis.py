@@ -13,7 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from scipy import stats
 
-from icebergsim.analysis import analyze_2x2, analyze_2x2_batch
+from icebergsim.analysis import analyze_2x2, analyze_2x2_batch, summarize_batch
 from icebergsim.model import Table2x2
 from icebergsim.rng import create_rng
 
@@ -141,6 +141,40 @@ def test_zero_event_cell_with_correction_uses_corrected_cells() -> None:
     assert result.eer == 0.05
 
 
+def test_zero_intervention_events_give_rr_exactly_zero() -> None:
+    """SPEC §7.1: with c > 0 and e = 0, RR = 0 is defined; §7.4 correction is CI-only."""
+    table = Table2x2(
+        control_events=10, control_observed=100, intervention_events=0, intervention_observed=100
+    )
+    with_correction = analyze_2x2(table, zero_cell_correction=0.5)
+    assert with_correction.rr == 0.0
+    assert with_correction.rrr == 1.0
+    assert with_correction.rr_ci is not None  # from corrected cells
+    assert "zero_event_cell" in with_correction.warnings
+    without_correction = analyze_2x2(table, zero_cell_correction=None)
+    assert without_correction.rr == 0.0
+    assert without_correction.rrr == 1.0
+    assert without_correction.rr_ci is None
+
+
+def test_batch_nulls_all_outputs_on_zero_denominator() -> None:
+    """SPEC §3.3: zero denominators give null (NaN) outputs, counted and excluded."""
+    batch = analyze_2x2_batch(
+        control_events=np.array([10, 0]),
+        control_observed=np.array([100, 0]),  # second replicate: whole control arm lost
+        intervention_events=np.array([5, 3]),
+        intervention_observed=np.array([100, 100]),
+    )
+    assert batch.zero_denominator_count == 1
+    assert not math.isnan(batch.cer[0]) and not math.isnan(batch.p_values[0])
+    for array in (batch.cer, batch.eer, batch.arr, batch.rr, batch.rrr, batch.p_values):
+        assert math.isnan(array[1])
+    # Summaries exclude the undefined replicate instead of NaN-poisoning everything.
+    summary = summarize_batch(batch, alpha=0.05)
+    assert math.isclose(summary.mean_cer, 0.10, abs_tol=1e-12)
+    assert not math.isnan(summary.mean_arr)
+
+
 def test_degenerate_all_events_table() -> None:
     table = Table2x2(
         control_events=10, control_observed=10, intervention_events=10, intervention_observed=10
@@ -174,9 +208,9 @@ def test_batch_analysis_matches_scalar_analysis_exactly() -> None:
                 p_value_method=method,
                 zero_cell_correction=correction,
             )
-            assert int(np.isnan(batch.rr).sum()) == (
-                batch.zero_event_cell_count if correction is None else 0
-            )
+            # RR is NaN only where CER = 0 without a correction; e = 0 rows give RR = 0.
+            expected_nan = int((c == 0).sum()) if correction is None else 0
+            assert int(np.isnan(batch.rr).sum()) == expected_nan
             for i in range(n_tables):
                 scalar = analyze_2x2(
                     Table2x2(
@@ -225,5 +259,8 @@ def test_outputs_are_bounded_and_cis_contain_estimates(data: st.DataObject) -> N
     assert result.arr_ci[0] <= result.arr <= result.arr_ci[1]
     if result.rr is not None:
         assert result.rr >= 0.0
-        assert result.rr_ci is not None
-        assert result.rr_ci[0] <= result.rr <= result.rr_ci[1]
+        # CI containment holds for regular tables; with a zero event cell the CI comes
+        # from corrected cells while the point estimate may be uncorrected (SPEC §7.4).
+        if "zero_event_cell" not in result.warnings:
+            assert result.rr_ci is not None
+            assert result.rr_ci[0] <= result.rr <= result.rr_ci[1]

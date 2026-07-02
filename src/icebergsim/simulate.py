@@ -17,12 +17,14 @@ import numpy.typing as npt
 from icebergsim import SPEC_VERSION
 from icebergsim.analysis import AnalysisBatch, analyze_2x2_batch, summarize_batch
 from icebergsim.model import (
+    DerivedLossProbabilities,
     ImperfectionDefinition,
     SimulationSummary,
     TrialDefinition,
     ValidatedTrial,
 )
 from icebergsim.rng import RNG_ALGORITHM, create_rng
+from icebergsim.validate import derive_loss_probabilities
 
 IntArray = npt.NDArray[np.int64]
 
@@ -53,6 +55,7 @@ class SimulationResult:
     arrays: AnalysisBatch
     summary: SimulationSummary
     warnings: tuple[str, ...]
+    notes: tuple[str, ...] = ()
 
 
 def simulate_trial(
@@ -87,9 +90,21 @@ def simulate_trial(
             type_i_error=null_result.summary.power,
             type_i_error_mcse=null_result.summary.power_mcse,
         )
-    warnings: tuple[str, ...] = ()
+    warnings: list[str] = []
     if batch.zero_event_cell_count > 0:
-        warnings = (f"zero_event_cell_replicates:{batch.zero_event_cell_count}",)
+        warnings.append(f"zero_event_cell_replicates:{batch.zero_event_cell_count}")
+    if batch.zero_denominator_count > 0:
+        warnings.append(
+            f"zero_denominator_replicates:{batch.zero_denominator_count} "
+            "(excluded from summaries; never counted as rejections)"
+        )
+    notes: tuple[str, ...] = ()
+    if not (
+        definition.control_imperfections == _IDEAL
+        and definition.intervention_imperfections == _IDEAL
+    ):
+        # AXIOMS §9 / SPEC §5.4: the precedence rule must be stated in outputs.
+        notes = ("crossover takes precedence over noncompliance when both occur (AXIOMS §9)",)
     return SimulationResult(
         input_hash=input_hash(definition),
         random_seed=definition.random_seed,
@@ -100,7 +115,8 @@ def simulate_trial(
         tables=tables,
         arrays=batch,
         summary=summary,
-        warnings=warnings,
+        warnings=tuple(warnings),
+        notes=notes,
     )
 
 
@@ -134,9 +150,123 @@ def _simulate_tables(validated: ValidatedTrial, rng: np.random.Generator) -> Sim
         and definition.intervention_imperfections == _IDEAL
     ):
         return _simulate_ideal_tables(validated, rng)
-    raise NotImplementedError(
-        "imperfection simulation (SPEC §6.2) is implemented in Step 5"
+    return _simulate_imperfect_tables(validated, rng)
+
+
+def _simulate_imperfect_tables(
+    validated: ValidatedTrial, rng: np.random.Generator
+) -> SimulatedTables:
+    """SPEC §6.2 for both assigned arms; analysis stays by assigned arm (ITT)."""
+    definition = validated.definition
+    include_lost = definition.analysis.include_lost_in_denominator
+    n_sims = definition.n_simulations
+    p_control = definition.control.event_probability
+    p_intervention = definition.intervention.event_probability
+    p_untreated = definition.untreated_event_probability
+    control_events, control_observed = _simulate_imperfect_arm(
+        n=validated.n_control,
+        imperfections=definition.control_imperfections,
+        p_assigned=p_control,
+        p_other=p_intervention,
+        p_untreated=p_untreated,
+        include_lost=include_lost,
+        n_sims=n_sims,
+        rng=rng,
     )
+    intervention_events, intervention_observed = _simulate_imperfect_arm(
+        n=validated.n_intervention,
+        imperfections=definition.intervention_imperfections,
+        p_assigned=p_intervention,
+        p_other=p_control,
+        p_untreated=p_untreated,
+        include_lost=include_lost,
+        n_sims=n_sims,
+        rng=rng,
+    )
+    return SimulatedTables(
+        control_events=_frozen(control_events),
+        control_observed=_frozen(control_observed),
+        intervention_events=_frozen(intervention_events),
+        intervention_observed=_frozen(intervention_observed),
+    )
+
+
+def _simulate_imperfect_arm(
+    *,
+    n: int,
+    imperfections: ImperfectionDefinition,
+    p_assigned: float,
+    p_other: float,
+    p_untreated: float,
+    include_lost: bool,
+    n_sims: int,
+    rng: np.random.Generator,
+) -> tuple[IntArray, IntArray]:
+    """One assigned arm per SPEC §6.2, via exact multinomial/binomial vectorization (§6.3).
+
+    Participants are independent and exchangeable, so the per-participant model factorizes
+    exactly: the count in each (behavior x lost) cell is Multinomial over the joint cell
+    probabilities, and observed events within a cell are Binomial with that cell's
+    observed-event probability
+
+        p_observed = p_latent * ascertainment_event + (1 - p_latent) * false_positive
+
+    where p_latent is the derived lost/non-lost probability (AXIOMS §8) of the cell's
+    actual exposure. Behavior cells encode AXIOMS §9 exactly: crossover has probability
+    X and takes precedence, noncompliance-without-crossover has probability (1-X)*N,
+    compliance has probability (1-X)*(1-N).
+    """
+    x = imperfections.crossover_probability
+    noncompliance = imperfections.noncompliance_probability
+    loss = imperfections.loss_probability
+    # Behavior order: comply -> assigned exposure, crossover -> other arm's exposure,
+    # noncompliance -> untreated exposure.
+    behavior_probs = np.array(
+        [(1.0 - x) * (1.0 - noncompliance), x, (1.0 - x) * noncompliance]
+    )
+    derived = [
+        _derived_or_raise(p_exposure, imperfections)
+        for p_exposure in (p_assigned, p_other, p_untreated)
+    ]
+    p_observed_nonlost = np.array(
+        [_observed_event_probability(d.p_nonlost, imperfections) for d in derived]
+    )
+    p_observed_lost = np.array(
+        [_observed_event_probability(d.p_lost, imperfections) for d in derived]
+    )
+    cell_probs = np.concatenate([behavior_probs * (1.0 - loss), behavior_probs * loss])
+    cell_probs = cell_probs / cell_probs.sum()  # remove float drift; sums to 1 by design
+    counts = rng.multinomial(n, cell_probs, size=n_sims)  # (n_sims, 6)
+    nonlost_counts, lost_counts = counts[:, :3], counts[:, 3:]
+    events = rng.binomial(nonlost_counts, p_observed_nonlost).sum(axis=1)
+    if include_lost:
+        events = events + rng.binomial(lost_counts, p_observed_lost).sum(axis=1)
+        observed = np.full(n_sims, n, dtype=np.int64)
+    else:
+        observed = n - lost_counts.sum(axis=1)
+    return events.astype(np.int64), observed.astype(np.int64)
+
+
+def _observed_event_probability(
+    p_latent: float, imperfections: ImperfectionDefinition
+) -> float:
+    """SPEC §6.2 step 8: ascertainment acts after latent event generation (AXIOMS §10)."""
+    return (
+        p_latent * imperfections.ascertainment_event_probability
+        + (1.0 - p_latent)
+        * imperfections.ascertainment_nonevent_false_positive_probability
+    )
+
+
+def _derived_or_raise(
+    p_exposure: float, imperfections: ImperfectionDefinition
+) -> DerivedLossProbabilities:
+    result = derive_loss_probabilities(
+        p_exposure, imperfections.loss_probability, imperfections.lost_event_risk_ratio
+    )
+    if isinstance(result, tuple):  # pragma: no cover - ValidatedTrial guarantees consistency
+        raise RuntimeError(f"validated trial has inconsistent derived probabilities: {result}")
+    return result
 
 
 def _simulate_ideal_tables(

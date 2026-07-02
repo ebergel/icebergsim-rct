@@ -95,22 +95,49 @@ def _relative_risk(
     zero_cell_correction: float | None,
     warnings: list[str],
 ) -> tuple[float | None, float | None, tuple[float, float] | None, tuple[float, float] | None]:
-    """SPEC §7.1/§7.4: RR, RRR and their CIs; zero event cells use the correction or None."""
-    if c == 0 or e == 0:
-        warnings.append("zero_event_cell")
-        if zero_cell_correction is None:
+    """SPEC §7.1/§7.4 zero-event-cell semantics:
+
+    - c == 0 (CER = 0): RR is undefined (§3.3) — null unless a correction is selected,
+      in which case RR and its CI both come from the corrected cells.
+    - e == 0 with c > 0: RR is defined and exactly 0 (§7.1); the correction applies
+      to the CI only (§7.4: "for the RR CI only").
+    - Otherwise: uncorrected RR and log-RR CI.
+    """
+    if c > 0 and e > 0:
+        rr = (e / big_e) / (c / big_c)
+        rr_ci = _log_rr_ci(rr, c, big_c, e, big_e, alpha)
+        return rr, 1.0 - rr, rr_ci, _reverse_ci(rr_ci)
+
+    warnings.append("zero_event_cell")
+    # A non-positive correction cannot remove the zero cell; treat it as disabled.
+    if zero_cell_correction is None or zero_cell_correction <= 0.0:
+        if c == 0:
             return None, None, None, None
-        warnings.append("zero_cell_correction_applied")
-        k = zero_cell_correction
-        c, e = c + k, e + k
-        big_c, big_e = big_c + 2.0 * k, big_e + 2.0 * k
-    rr = (e / big_e) / (c / big_c)
-    rrr = 1.0 - rr
+        return 0.0, 1.0, None, None
+    warnings.append("zero_cell_correction_applied")
+    k = zero_cell_correction
+    corrected_c, corrected_e = c + k, e + k
+    corrected_big_c, corrected_big_e = big_c + 2.0 * k, big_e + 2.0 * k
+    corrected_rr = (corrected_e / corrected_big_e) / (corrected_c / corrected_big_c)
+    rr_ci = _log_rr_ci(
+        corrected_rr, corrected_c, corrected_big_c, corrected_e, corrected_big_e, alpha
+    )
+    rr = corrected_rr if c == 0 else 0.0
+    return rr, 1.0 - rr, rr_ci, _reverse_ci(rr_ci)
+
+
+def _log_rr_ci(
+    rr: float, c: float, big_c: float, e: float, big_e: float, alpha: float
+) -> tuple[float, float]:
+    """SPEC §7.4 log-RR Wald interval from the (possibly corrected) cells."""
     se_log_rr = math.sqrt(1.0 / e - 1.0 / big_e + 1.0 / c - 1.0 / big_c)
     z = _z_two_sided(alpha)
-    rr_lo = math.exp(math.log(rr) - z * se_log_rr)
-    rr_hi = math.exp(math.log(rr) + z * se_log_rr)
-    return rr, rrr, (rr_lo, rr_hi), (1.0 - rr_hi, 1.0 - rr_lo)
+    return math.exp(math.log(rr) - z * se_log_rr), math.exp(math.log(rr) + z * se_log_rr)
+
+
+def _reverse_ci(rr_ci: tuple[float, float]) -> tuple[float, float]:
+    """RRR CI = 1 - reversed RR CI (SPEC §7.4)."""
+    return 1.0 - rr_ci[1], 1.0 - rr_ci[0]
 
 
 def _p_value(
@@ -183,7 +210,7 @@ P_VALUE_METHODS: dict[str, PValueFunction] = {
 
 @dataclass(frozen=True, slots=True)
 class AnalysisBatch:
-    """Per-replicate analysis arrays. RR/RRR hold NaN where undefined (null on export)."""
+    """Per-replicate analysis arrays, read-only. NaN encodes undefined (null on export)."""
 
     cer: FloatArray
     eer: FloatArray
@@ -192,6 +219,7 @@ class AnalysisBatch:
     rrr: FloatArray
     p_values: FloatArray
     zero_event_cell_count: int
+    zero_denominator_count: int
 
 
 def analyze_2x2_batch(
@@ -203,34 +231,55 @@ def analyze_2x2_batch(
     p_value_method: str = "likelihood_ratio",
     zero_cell_correction: float | None = 0.5,
 ) -> AnalysisBatch:
-    """Vectorized analysis of many 2x2 tables, exactly equivalent to analyze_2x2 per table."""
+    """Vectorized analysis of many 2x2 tables, exactly equivalent to analyze_2x2 per table.
+
+    Replicates where either observed denominator is zero (possible when everyone in an arm
+    is lost to follow-up) get NaN in every output, mirroring the scalar zero_denominator
+    behavior (SPEC §3.3); they are counted in ``zero_denominator_count``.
+    """
     c = np.asarray(control_events, dtype=np.float64)
     big_c = np.asarray(control_observed, dtype=np.float64)
     e = np.asarray(intervention_events, dtype=np.float64)
     big_e = np.asarray(intervention_observed, dtype=np.float64)
 
-    cer, eer = c / big_c, e / big_e
+    invalid = (big_c <= 0) | (big_e <= 0)
+    safe_big_c = np.where(big_c > 0, big_c, 1.0)
+    safe_big_e = np.where(big_e > 0, big_e, 1.0)
+    cer = np.where(invalid, np.nan, c / safe_big_c)
+    eer = np.where(invalid, np.nan, e / safe_big_e)
     arr = cer - eer
-    zero_mask = (c == 0) | (e == 0)
-    if zero_cell_correction is None:
-        safe_c = np.where(zero_mask, 1.0, c)  # dummy avoids 0/0; result masked to NaN below
-        rr = np.where(zero_mask, np.nan, (e / big_e) / (safe_c / big_c))
+
+    # SPEC §7.1/§7.4 zero-event-cell semantics, identical to the scalar path:
+    # c == 0 -> RR undefined unless corrected; e == 0 with c > 0 -> RR is exactly 0.
+    zero_event = ((c == 0) | (e == 0)) & ~invalid
+    control_zero = (c == 0) & ~invalid
+    safe_c = np.where(c > 0, c, 1.0)
+    rr = (e / safe_big_e) / (safe_c / safe_big_c)  # rows with e == 0 are exactly 0 here
+    if zero_cell_correction is None or zero_cell_correction <= 0.0:
+        rr = np.where(control_zero, np.nan, rr)
     else:
         k = zero_cell_correction
-        corr_c = np.where(zero_mask, c + k, c)
-        corr_e = np.where(zero_mask, e + k, e)
-        corr_big_c = np.where(zero_mask, big_c + 2.0 * k, big_c)
-        corr_big_e = np.where(zero_mask, big_e + 2.0 * k, big_e)
-        rr = (corr_e / corr_big_e) / (corr_c / corr_big_c)
+        corrected_rr = ((e + k) / (big_e + 2.0 * k)) / ((c + k) / (big_c + 2.0 * k))
+        rr = np.where(control_zero, corrected_rr, rr)
+    rr = np.where(invalid, np.nan, rr)
+
+    p_values = _batch_p_values(c, safe_big_c, e, safe_big_e, p_value_method)
+    p_values = np.where(invalid, np.nan, p_values)
     return AnalysisBatch(
-        cer=cer,
-        eer=eer,
-        arr=arr,
-        rr=rr,
-        rrr=1.0 - rr,
-        p_values=_batch_p_values(c, big_c, e, big_e, p_value_method),
-        zero_event_cell_count=int(zero_mask.sum()),
+        cer=_read_only(cer),
+        eer=_read_only(eer),
+        arr=_read_only(arr),
+        rr=_read_only(rr),
+        rrr=_read_only(1.0 - rr),
+        p_values=_read_only(p_values),
+        zero_event_cell_count=int(zero_event.sum()),
+        zero_denominator_count=int(invalid.sum()),
     )
+
+
+def _read_only(array: FloatArray) -> FloatArray:
+    array.setflags(write=False)
+    return array
 
 
 def _batch_p_values(
@@ -288,23 +337,32 @@ def _chi2_sf(statistic: FloatArray) -> FloatArray:
 
 
 def summarize_batch(batch: AnalysisBatch, alpha: float) -> SimulationSummary:
-    """Summarize per-replicate arrays into SPEC §4.3 summary statistics."""
-    arr, rr = batch.arr, batch.rr
-    n = arr.size
-    power = float(np.mean(batch.p_values < alpha))
-    defined_rr = rr[~np.isnan(rr)]
+    """Summarize per-replicate arrays into SPEC §4.3 summary statistics.
+
+    Undefined replicates (NaN, e.g. zero observed denominators) are excluded from means,
+    medians, and percentiles. A NaN p-value never counts as a rejection, so replicates
+    without an analyzable table reduce power rather than crash it.
+    """
+    cer = _defined(batch.cer)
+    eer = _defined(batch.eer)
+    arr = _defined(batch.arr)
+    defined_rr = _defined(batch.rr)
+    n = batch.arr.size
+    with np.errstate(invalid="ignore"):  # NaN p-values compare False, by design
+        power = float(np.mean(batch.p_values < alpha))
     benefit = arr[arr > 0.0]
     harm = arr[arr < 0.0]
     return SimulationSummary(
-        mean_cer=float(batch.cer.mean()),
-        mean_eer=float(batch.eer.mean()),
-        mean_arr=float(arr.mean()),
+        mean_cer=float(cer.mean()) if cer.size else math.nan,
+        mean_eer=float(eer.mean()) if eer.size else math.nan,
+        mean_arr=float(arr.mean()) if arr.size else math.nan,
         mean_rr=float(defined_rr.mean()) if defined_rr.size else None,
         mean_rrr=float(1.0 - defined_rr.mean()) if defined_rr.size else None,
-        median_arr=float(np.median(arr)),
+        median_arr=float(np.median(arr)) if arr.size else math.nan,
         ci95_arr_empirical=(
-            float(np.percentile(arr, 2.5)),
-            float(np.percentile(arr, 97.5)),
+            (float(np.percentile(arr, 2.5)), float(np.percentile(arr, 97.5)))
+            if arr.size
+            else (math.nan, math.nan)
         ),
         ci95_rr_empirical=(
             (float(np.percentile(defined_rr, 2.5)), float(np.percentile(defined_rr, 97.5)))
@@ -316,6 +374,10 @@ def summarize_batch(batch: AnalysisBatch, alpha: float) -> SimulationSummary:
         mean_nnt=float((1.0 / benefit).mean()) if benefit.size else None,
         mean_nnh=float((-1.0 / harm).mean()) if harm.size else None,
     )
+
+
+def _defined(array: FloatArray) -> FloatArray:
+    return array[~np.isnan(array)]
 
 
 def _z_two_sided(alpha: float) -> float:

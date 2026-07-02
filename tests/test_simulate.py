@@ -119,14 +119,6 @@ def test_summary_effect_measures_are_consistent() -> None:
     assert summary.mean_nnt is not None and summary.mean_nnt > 0
 
 
-def test_imperfect_trials_not_yet_supported() -> None:
-    validated = make_validated(
-        imperfections={"control": {"loss_probability": 0.1}, "intervention": {}}
-    )
-    with pytest.raises(NotImplementedError):
-        simulate_trial(validated)
-
-
 def test_simulation_does_not_mutate_definition() -> None:
     validated = make_validated(n_simulations=100)
     before = dataclasses.asdict(validated.definition)

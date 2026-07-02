@@ -11,13 +11,16 @@ from __future__ import annotations
 import dataclasses
 import math
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from icebergsim.model import (
     Allocation,
+    AnalysisOptions,
+    AnalysisPopulation,
     ArmDefinition,
     DerivedLossProbabilities,
     ImperfectionDefinition,
+    PValueMethod,
     TrialDefinition,
     ValidatedTrial,
     ValidationError,
@@ -30,6 +33,21 @@ Errors = tuple[ValidationError, ...]
 
 MODES = ("individual_binary", "cluster_post", "cluster_pre_post")
 ALTERNATIVES = ("two_sided", "superiority_one_sided", "noninferiority_one_sided")
+
+P_VALUE_METHOD_ENUM = (
+    "likelihood_ratio",
+    "pearson_chi_square",
+    "fisher_exact",
+    "monte_carlo_exact",
+)
+SUPPORTED_P_VALUE_METHODS = ("likelihood_ratio", "pearson_chi_square", "fisher_exact")
+ANALYSIS_POPULATION_ENUM = (
+    "intention_to_treat_observed",
+    "intention_to_treat_all_randomized",
+    "as_treated",
+    "per_protocol",
+)
+SUPPORTED_ANALYSIS_POPULATIONS = ("intention_to_treat_observed",)
 
 _IMPERFECTION_DEFAULTS = ImperfectionDefinition()
 _IMPERFECTION_PROBABILITY_FIELDS = (
@@ -137,6 +155,11 @@ def _parse_definition(
         )
 
     raw_imperfections = raw.get("imperfections") or {}
+    if not isinstance(raw_imperfections, Mapping):
+        errors.append(
+            _error("invalid_type", "imperfections must be a mapping.", "imperfections")
+        )
+        raw_imperfections = {}
     return TrialDefinition(
         id=str(raw.get("id", "")),
         label=str(raw.get("label", raw.get("id", ""))),
@@ -158,6 +181,7 @@ def _parse_definition(
         intervention_imperfections=_parse_imperfections(
             raw_imperfections.get("intervention"), "intervention", errors
         ),
+        analysis=_parse_analysis_options(raw.get("analysis"), errors),
     )
 
 
@@ -212,6 +236,85 @@ def _parse_imperfections(
         for f in dataclasses.fields(ImperfectionDefinition)
     }
     return ImperfectionDefinition(**values)
+
+
+def _parse_analysis_options(
+    raw_analysis: Any, errors: list[ValidationError]
+) -> AnalysisOptions:
+    """Parse SPEC §4.1 analysis options; unsupported choices are rejected, never silent."""
+    if raw_analysis is None:
+        return AnalysisOptions()
+    if not isinstance(raw_analysis, Mapping):
+        errors.append(_error("invalid_type", "analysis must be a mapping.", "analysis"))
+        return AnalysisOptions()
+
+    method = raw_analysis.get("p_value_method", "likelihood_ratio")
+    if method not in P_VALUE_METHOD_ENUM:
+        errors.append(
+            _error(
+                "invalid_p_value_method",
+                f"p_value_method must be one of {P_VALUE_METHOD_ENUM}, got {method!r}.",
+                "analysis.p_value_method",
+            )
+        )
+        method = "likelihood_ratio"
+    elif method not in SUPPORTED_P_VALUE_METHODS:
+        errors.append(
+            _error(
+                "p_value_method_not_supported",
+                f"p_value_method {method!r} is not supported by this implementation; "
+                f"supported: {SUPPORTED_P_VALUE_METHODS}.",
+                "analysis.p_value_method",
+            )
+        )
+        method = "likelihood_ratio"
+
+    population = raw_analysis.get("analysis_population", "intention_to_treat_observed")
+    if population not in ANALYSIS_POPULATION_ENUM:
+        errors.append(
+            _error(
+                "invalid_analysis_population",
+                f"analysis_population must be one of {ANALYSIS_POPULATION_ENUM}, "
+                f"got {population!r}.",
+                "analysis.analysis_population",
+            )
+        )
+        population = "intention_to_treat_observed"
+    elif population not in SUPPORTED_ANALYSIS_POPULATIONS:
+        errors.append(
+            _error(
+                "analysis_population_not_supported",
+                f"analysis_population {population!r} is not supported yet; "
+                f"supported: {SUPPORTED_ANALYSIS_POPULATIONS}.",
+                "analysis.analysis_population",
+            )
+        )
+        population = "intention_to_treat_observed"
+
+    ci_method = raw_analysis.get("confidence_interval_method", "log_rr_and_wald_arr")
+    if ci_method != "log_rr_and_wald_arr":
+        errors.append(
+            _error(
+                "confidence_interval_method_not_supported",
+                f"confidence_interval_method {ci_method!r} is not supported; "
+                "supported: ('log_rr_and_wald_arr',).",
+                "analysis.confidence_interval_method",
+            )
+        )
+        ci_method = "log_rr_and_wald_arr"
+
+    return AnalysisOptions(
+        p_value_method=cast("PValueMethod", method),
+        confidence_interval_method=str(ci_method),
+        include_lost_in_denominator=_read_bool(
+            raw_analysis,
+            "include_lost_in_denominator",
+            default=False,
+            path="analysis.include_lost_in_denominator",
+            errors=errors,
+        ),
+        analysis_population=cast("AnalysisPopulation", population),
+    )
 
 
 def _read_zero_cell_correction(
@@ -271,11 +374,11 @@ def _check_bounds(definition: TrialDefinition, errors: list[ValidationError]) ->
             )
         )
     correction = definition.zero_cell_correction
-    if correction is not None and correction < 0.0:
+    if correction is not None and correction <= 0.0:
         errors.append(
             _error(
-                "zero_cell_correction_negative",
-                "zero_cell_correction must be >= 0 or null.",
+                "zero_cell_correction_not_positive",
+                "zero_cell_correction must be > 0, or null to disable the correction.",
                 "zero_cell_correction",
             )
         )
@@ -377,6 +480,21 @@ def _read_number(
         errors.append(_error("invalid_type", f"{path} must be a number, got {value!r}.", path))
         return 0.0
     return float(value)
+
+
+def _read_bool(
+    raw: Mapping[str, Any],
+    key: str,
+    *,
+    default: bool,
+    path: str,
+    errors: list[ValidationError],
+) -> bool:
+    value = raw.get(key, default)
+    if not isinstance(value, bool):
+        errors.append(_error("invalid_type", f"{path} must be a boolean, got {value!r}.", path))
+        return default
+    return value
 
 
 def _read_int(

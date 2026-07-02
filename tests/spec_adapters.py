@@ -14,7 +14,6 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
-import pytest
 
 from icebergsim.analysis import analyze_2x2
 from icebergsim.model import Table2x2, ValidationError
@@ -150,7 +149,12 @@ def _adapt_simulate_individual_trial(case_input: Mapping[str, Any]) -> Mapping[s
         )
         return {"arrays_identical": identical}
     if "pragmatic" in case_input:  # ideal-vs-pragmatic power comparison
-        pytest.xfail("imperfection simulation (SPEC §6.2) is implemented in Step 5")
+        ideal = _run_simulation(case_input["ideal"])
+        worse = _run_simulation(case_input["pragmatic"])
+        return {
+            "pragmatic_power_less_than_ideal_power": worse.summary.power
+            < ideal.summary.power
+        }
     result = _run_simulation(case_input)
     return {
         "mean_cer": result.summary.mean_cer,

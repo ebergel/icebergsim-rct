@@ -31,6 +31,15 @@ def test_algorithm_is_named_and_used() -> None:
     assert type(rng.bit_generator).__name__ == RNG_ALGORITHM
 
 
+def test_negative_seed_is_valid_and_reproducible() -> None:
+    """SPEC §4.1 allows any integer seed; negatives map deterministically."""
+    a = create_rng(-1, "main").binomial(100, 0.3, size=50)
+    b = create_rng(-1, "main").binomial(100, 0.3, size=50)
+    c = create_rng(1, "main").binomial(100, 0.3, size=50)
+    assert np.array_equal(a, b)
+    assert not np.array_equal(a, c)
+
+
 def test_none_seed_is_allowed() -> None:
     rng = create_rng(None, "main")
     draws = rng.binomial(10, 0.5, size=5)

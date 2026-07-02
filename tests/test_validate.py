@@ -192,6 +192,57 @@ def test_inconsistent_loss_multiplier_rejected_per_arm_and_exposure() -> None:
     assert all(e.details.get("assigned_arm") != "intervention" for e in result)
 
 
+def test_analysis_options_parsed() -> None:
+    raw = minimal_raw(
+        analysis={
+            "p_value_method": "pearson_chi_square",
+            "include_lost_in_denominator": True,
+        }
+    )
+    result = validate_trial_definition(raw)
+    assert isinstance(result, ValidatedTrial)
+    assert result.definition.analysis.p_value_method == "pearson_chi_square"
+    assert result.definition.analysis.include_lost_in_denominator is True
+    assert result.definition.analysis.analysis_population == "intention_to_treat_observed"
+
+
+def test_unknown_p_value_method_rejected() -> None:
+    raw = minimal_raw(analysis={"p_value_method": "students_t"})
+    assert "invalid_p_value_method" in error_codes(validate_trial_definition(raw))
+
+
+def test_unsupported_p_value_method_rejected_explicitly() -> None:
+    # monte_carlo_exact is in the schema enum but this implementation does not support it;
+    # SPEC §7.7 requires stating unsupported methods rather than failing silently.
+    raw = minimal_raw(analysis={"p_value_method": "monte_carlo_exact"})
+    assert "p_value_method_not_supported" in error_codes(validate_trial_definition(raw))
+
+
+def test_unsupported_analysis_population_rejected_explicitly() -> None:
+    raw = minimal_raw(analysis={"analysis_population": "as_treated"})
+    assert "analysis_population_not_supported" in error_codes(validate_trial_definition(raw))
+    raw = minimal_raw(analysis={"analysis_population": "sickest_first"})
+    assert "invalid_analysis_population" in error_codes(validate_trial_definition(raw))
+
+
+def test_non_mapping_imperfections_rejected_structurally() -> None:
+    raw = minimal_raw(imperfections=["oops"])
+    codes = error_codes(validate_trial_definition(raw))
+    assert "invalid_type" in codes  # never an unhandled exception (SPEC §18)
+
+
+def test_zero_cell_correction_of_zero_rejected() -> None:
+    raw = minimal_raw(zero_cell_correction=0)
+    codes = error_codes(validate_trial_definition(raw))
+    assert "zero_cell_correction_not_positive" in codes
+
+
+def test_unsupported_confidence_interval_method_rejected() -> None:
+    raw = minimal_raw(analysis={"confidence_interval_method": "newcombe_score"})
+    codes = error_codes(validate_trial_definition(raw))
+    assert "confidence_interval_method_not_supported" in codes
+
+
 def test_validation_never_mutates_input() -> None:
     raw = minimal_raw()
     snapshot = {**raw, "arms": {k: dict(v) for k, v in raw["arms"].items()}}

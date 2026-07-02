@@ -24,4 +24,7 @@ def create_rng(seed: int | None, stream_name: str = "") -> np.random.Generator:
     if seed is None:
         return np.random.Generator(np.random.PCG64())
     stream_key = int.from_bytes(hashlib.sha256(stream_name.encode()).digest()[:8], "big")
-    return np.random.Generator(np.random.PCG64(np.random.SeedSequence([seed, stream_key])))
+    # SPEC §4.1 allows any integer seed; SeedSequence requires non-negative entropy, so
+    # negative seeds are mapped deterministically (two's complement into 64 bits).
+    entropy = seed % 2**64
+    return np.random.Generator(np.random.PCG64(np.random.SeedSequence([entropy, stream_key])))
