@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { QuickTrial } from "./pages/QuickTrial";
+import { SampleSizePower } from "./pages/SampleSizePower";
+import { TrialGoesBadly } from "./pages/TrialGoesBadly";
 
 const PAGES = [
   { key: "quick", label: "Quick Trial", ready: true },
-  { key: "imperfections", label: "Trial Goes Badly", ready: false },
-  { key: "sample-size", label: "Sample Size & Power", ready: false },
+  { key: "imperfections", label: "Trial Goes Badly", ready: true },
+  { key: "sample-size", label: "Sample Size & Power", ready: true },
   { key: "stopping", label: "Stopping Rules", ready: false },
   { key: "subgroups", label: "Risk Subgroups", ready: false },
   { key: "cluster", label: "Cluster Trials", ready: false },
@@ -48,7 +50,11 @@ export function App() {
           ))}
         </nav>
       </header>
-      <main>{page === "quick" && <QuickTrial />}</main>
+      <main>
+        {page === "quick" && <QuickTrial />}
+        {page === "imperfections" && <TrialGoesBadly />}
+        {page === "sample-size" && <SampleSizePower />}
+      </main>
       <footer>
         <p className="muted">
           Simulated operating characteristics of hypothetical designs — judgment about real

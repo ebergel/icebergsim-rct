@@ -107,15 +107,18 @@ legend {
   color: var(--muted);
 }
 
-.field input {
+.field input,
+.field select {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.45rem 0.55rem;
   font-size: 0.95rem;
   width: 100%;
+  background: var(--surface);
 }
 
-.field-error input {
+.field-error input,
+.field-error select {
   border-color: var(--error);
   outline-color: var(--error);
 }
