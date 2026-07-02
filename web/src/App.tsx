@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { ClusterTrials } from "./pages/ClusterTrials";
 import { QuickTrial } from "./pages/QuickTrial";
 import { RiskSubgroups } from "./pages/RiskSubgroups";
 import { SampleSizePower } from "./pages/SampleSizePower";
@@ -12,7 +13,7 @@ const PAGES = [
   { key: "sample-size", label: "Sample Size & Power", ready: true },
   { key: "stopping", label: "Stopping Rules", ready: true },
   { key: "subgroups", label: "Risk Subgroups", ready: true },
-  { key: "cluster", label: "Cluster Trials", ready: false },
+  { key: "cluster", label: "Cluster Trials", ready: true },
 ] as const;
 
 type PageKey = (typeof PAGES)[number]["key"];
@@ -58,6 +59,7 @@ export function App() {
         {page === "sample-size" && <SampleSizePower />}
         {page === "stopping" && <StoppingRules />}
         {page === "subgroups" && <RiskSubgroups />}
+        {page === "cluster" && <ClusterTrials />}
       </main>
       <footer>
         <p className="muted">

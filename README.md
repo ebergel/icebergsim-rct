@@ -15,6 +15,21 @@ implementation is a translation verified against [spec/tests.yaml](spec/tests.ya
 - Risk subgroup simulation with count-level aggregation.
 - Post-only cluster randomized trials (beta-binomial, ICC).
 
+## Web UI
+
+A local FastAPI + React interface covering the SPEC §17 workflows (quick trial, pragmatic
+imperfections, sample size & power, stopping rules, risk subgroups, cluster trials), with
+field-level validation errors and SPEC §16 plots drawn from server-provided plot data.
+
+```bash
+cd web && npm install && npm run build && cd ..   # once, builds web/dist
+uv run icebergsim-server                          # serves UI + API at http://127.0.0.1:8000
+```
+
+The UI contains no statistical formulas (ARCHITECTURE §3.12): every number comes from the
+REST API (`server/icebergsim_server/`), which is a thin bridge to the engine. Restart the
+server after backend changes. Frontend dev mode: `cd web && npm run dev` (proxies /api).
+
 ## Development
 
 ```bash
@@ -22,6 +37,7 @@ uv sync
 uv run pytest
 uv run ruff check
 uv run mypy
+cd web && npm test && npx tsc --noEmit   # frontend tests + typecheck
 ```
 
 Canonical spec tests are parsed from `spec/tests.yaml` and run as first-class pytest cases

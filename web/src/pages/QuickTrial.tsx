@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { api, ApiValidationError } from "../api";
 import { NumberField } from "../components/NumberField";
+import { downloadJson } from "../lib/download";
 import { ResultPlots } from "../components/ResultPlots";
 import { SummaryCards } from "../components/SummaryCards";
 import {
@@ -24,6 +25,29 @@ export function QuickTrial() {
   const [errors, setErrors] = useState<MappedErrors>(NO_ERRORS);
   const [running, setRunning] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  async function downloadResult() {
+    // Re-fetch with the raw per-replicate arrays included (SPEC §2.9 export shape),
+    // reproducible because the same definition and seed are resubmitted.
+    setDownloading(true);
+    try {
+      const response = await fetch(
+        "/api/simulate?include_arrays=true" + (includeTypeI ? "&include_type_i_error=true" : ""),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildDefinition(form)),
+        },
+      );
+      if (!response.ok) throw new Error(`download failed: ${response.status}`);
+      downloadJson(await response.json(), "icebergsim_result.json");
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   const set = <K extends keyof QuickTrialForm>(key: K) => (value: QuickTrialForm[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -166,6 +190,15 @@ export function QuickTrial() {
         <div data-testid="results">
           <SummaryCards result={result} />
           <ResultPlots result={result} />
+          <button
+            type="button"
+            className="tab"
+            onClick={() => void downloadResult()}
+            disabled={downloading}
+            data-testid="download-json"
+          >
+            {downloading ? "Preparing…" : "Download full result (JSON, with arrays)"}
+          </button>
         </div>
       )}
     </section>
