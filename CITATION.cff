@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use ICEBERGSIM in your research or teaching, please cite it as below."
+title: "ICEBERGSIM v2: a clinical trial simulator"
+type: software
+authors:
+  - family-names: Bergel
+    given-names: Eduardo
+version: 2.0.0-alpha.1
+date-released: 2026-07-02
+license: MIT
+repository-code: "https://github.com/ebergel/icebergsim"
+url: "https://ebergel.github.io/icebergsim/"
+abstract: >-
+  A Monte Carlo simulator for binary-outcome randomized controlled trials:
+  statistical power, Type I error, effect measures with confidence intervals,
+  pragmatic imperfections (loss to follow-up, noncompliance, crossover,
+  outcome ascertainment), interim stopping rules, risk subgroups, and cluster
+  randomized designs. Regenerated from an implementation-independent Phoenix
+  specification distilled from the historical ICEBERGSIM Controlled Trial
+  Simulator, originally created by Eduardo Bergel with David Sackett and an
+  international consortium (PRACTIHC).
+keywords:
+  - clinical trials
+  - randomized controlled trials
+  - Monte Carlo simulation
+  - statistical power
+  - biostatistics
+  - epidemiology
+  - cluster randomized trials
