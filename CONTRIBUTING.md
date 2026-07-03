@@ -20,7 +20,7 @@ The Phoenix specification in [`spec/`](spec/) — `AXIOMS.md`, `SPEC.md`, `ARCHI
 ## Getting started
 
 ```bash
-git clone https://github.com/ebergel/icebergsim && cd icebergsim
+git clone https://github.com/ebergel/icebergsim-rct && cd icebergsim-rct
 uv sync                                  # engine + API (Python ≥ 3.12)
 cd web && npm ci && cd ..                # web UI (Node ≥ 20)
 ```

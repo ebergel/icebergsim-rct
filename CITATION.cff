@@ -8,8 +8,8 @@ authors:
 version: 2.0.0-alpha.1
 date-released: 2026-07-02
 license: MIT
-repository-code: "https://github.com/ebergel/icebergsim"
-url: "https://ebergel.github.io/icebergsim/"
+repository-code: "https://github.com/ebergel/icebergsim-rct"
+url: "https://ebergel.github.io/icebergsim-rct/"
 abstract: >-
   A Monte Carlo simulator for binary-outcome randomized controlled trials:
   statistical power, Type I error, effect measures with confidence intervals,
