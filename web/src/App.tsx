@@ -33,7 +33,7 @@ export function App() {
     <div className="app">
       <header>
         <h1>
-          ICEBERGSIM <span className="muted">v2</span>
+          IcebergSim <span className="muted">RCT</span>
         </h1>
         <p className="tagline">
           Clinical trial simulator — signal, noise, and sample size, first-hand.

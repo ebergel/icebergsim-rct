@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use ICEBERGSIM in your research or teaching, please cite it as below."
-title: "ICEBERGSIM v2: a clinical trial simulator"
+title: "IcebergSim RCT: a clinical trial simulator"
 type: software
 authors:
   - family-names: Bergel

@@ -1,4 +1,7 @@
-# ICEBERGSIM v2
+# IcebergSim RCT
+
+Part of the [IcebergSim program](https://icebergsim.com) · program handle: **ISM_RCT_R** · [program map](https://github.com/ebergel/icebergsim)
+Implements the ICEBERGSIM v2 specification ([spec/](spec/), SPEC_VERSION 2.0.0-alpha.1).
 
 A clinical trial simulator for binary-outcome randomized controlled trials, regenerated from the
 Phoenix specification in [spec/](spec/). The specification is the source of truth; this Python

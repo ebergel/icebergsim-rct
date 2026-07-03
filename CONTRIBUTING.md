@@ -1,4 +1,4 @@
-# Contributing to ICEBERGSIM
+# Contributing to IcebergSim RCT
 
 Thank you for considering a contribution. This project has one unusual rule that shapes
 everything else:
@@ -6,7 +6,7 @@ everything else:
 ## The specification is the source
 
 The Phoenix specification in [`spec/`](spec/) — `AXIOMS.md`, `SPEC.md`, `ARCHITECTURE.md`,
-`tests.yaml` — defines what ICEBERGSIM *is*. The Python/TypeScript code is a translation.
+`tests.yaml` — defines what the simulator *is*. The Python/TypeScript code is a translation.
 
 - **Never edit files under `spec/`** in a code PR. Spec changes are their own discussion:
   a change that alters output definitions, formulas, or model semantics is a breaking
