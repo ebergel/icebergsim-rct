@@ -21,7 +21,7 @@ def create_app(
     examples_dir: Path | None = None,
     static_dir: Path | None = DEFAULT_STATIC_DIR,
 ) -> FastAPI:
-    app = FastAPI(title="ICEBERGSIM v2", version=SPEC_VERSION)
+    app = FastAPI(title="IcebergSim RCT API", version=SPEC_VERSION)
     app.include_router(api_router(examples_dir or DEFAULT_EXAMPLES_DIR))
     if static_dir is not None and static_dir.is_dir():
         # The built SPA; html=True serves index.html at / and on client-side routes.

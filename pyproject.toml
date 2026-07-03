@@ -1,7 +1,7 @@
 [project]
 name = "icebergsim"
 version = "2.0.0a1"
-description = "ICEBERGSIM v2 — clinical trial simulator regenerated from the Phoenix specification"
+description = "IcebergSim RCT — clinical trial simulator (implements the ICEBERGSIM v2 specification)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
