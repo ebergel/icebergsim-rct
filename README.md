@@ -7,6 +7,12 @@ A clinical trial simulator for binary-outcome randomized controlled trials, rege
 Phoenix specification in [spec/](spec/). The specification is the source of truth; this Python
 implementation is a translation verified against [spec/tests.yaml](spec/tests.yaml).
 
+## Online APP
+
+The full APP is available at this link.
+
+👉 [IcebergSim RCT app]( https://icebergsim-rct-production.up.railway.app  )
+
 ## What it does
 
 - Two-arm individually randomized binary-outcome trial simulation (Monte Carlo).
